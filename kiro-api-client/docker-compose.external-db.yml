@@ -9,8 +9,9 @@ services:
     container_name: kiro-api
     restart: unless-stopped
     ports:
-      - "${PORT:-3000}:3000"
+      - "${PORT:-13003}:13003"
     environment:
+      - PORT=13003
       - MYSQL_HOST=${MYSQL_HOST}
       - MYSQL_PORT=${MYSQL_PORT:-3306}
       - MYSQL_USER=${MYSQL_USER}
