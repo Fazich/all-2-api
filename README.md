@@ -29,7 +29,52 @@ npm install
 npm run server
 ```
 
-访问 http://localhost:3000 打开管理界面。密码是admin admin123
+访问 http://localhost:13003 打开管理界面。默认账号密码：admin / admin123
+
+### Docker 部署
+
+#### 使用内置 MySQL（推荐）
+
+```bash
+# 复制环境变量配置
+cp .env.example .env
+
+# 启动服务（包含 MySQL）
+docker-compose up -d
+
+# 查看日志
+docker-compose logs -f
+
+# 停止服务
+docker-compose down
+```
+
+#### 使用外部数据库
+
+```bash
+# 复制并编辑环境变量
+cp .env.example .env
+# 编辑 .env，设置外部数据库地址：
+# MYSQL_HOST=your-db-host
+# MYSQL_PORT=3306
+# MYSQL_USER=your-user
+# MYSQL_PASSWORD=your-password
+
+# 启动服务（不启动内置 MySQL）
+docker-compose -f docker-compose.external-db.yml up -d
+```
+
+#### 环境变量说明
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `PORT` | `13003` | API 服务端口 |
+| `MYSQL_HOST` | `mysql` | 数据库地址 |
+| `MYSQL_PORT` | `3306` | 数据库端口 |
+| `MYSQL_USER` | `root` | 数据库用户 |
+| `MYSQL_PASSWORD` | `kiro123456` | 数据库密码 |
+| `MYSQL_DATABASE` | `kiro_api` | 数据库名称 |
+| `MYSQL_EXTERNAL_PORT` | `13306` | MySQL 外部访问端口 |
 
 ### Index Page
 ![Index Page](https://github.com/CaiGaoQing/kiro-api-client/blob/main/index.png?raw=true)
