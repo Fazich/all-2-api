@@ -473,10 +473,13 @@ async function checkUsageLimits(keyRecord, clientIp) {
 
     // 检查有效期
     if (expiresInDays > 0 && createdAt) {
-        const createDate = new Date(createdAt);
+        // createdAt 是数据库存储的北京时间字符串 "YYYY-MM-DD HH:mm:ss"
+        // 解析时指定为北京时间（UTC+8）
+        const createDateStr = createdAt.replace(' ', 'T') + '+08:00';
+        const createDate = new Date(createDateStr);
         const expireDate = new Date(createDate.getTime() + expiresInDays * 24 * 60 * 60 * 1000);
         const now = new Date();
-        console.log(`[API Key 过期检查] createdAt: ${createdAt}, createDate: ${createDate.toISOString()}, expireDate: ${expireDate.toISOString()}, now: ${now.toISOString()}, expired: ${now > expireDate}`);
+        // console.log(`[API Key 过期检查] createdAt: ${createdAt}, createDate: ${createDate.toISOString()}, expireDate: ${expireDate.toISOString()}, now: ${now.toISOString()}, expired: ${now > expireDate}`);
         if (now > expireDate) {
             return { allowed: false, reason: `密钥已过期 (有效期 ${expiresInDays} 天)` };
         }
@@ -1298,16 +1301,13 @@ app.get('/api/keys/:id/limits-status', authMiddleware, async (req, res) => {
         let remainingDays = null;
         let expireDate = null;
         if (key.expiresInDays > 0 && key.createdAt) {
-            // createdAt 是数据库存储的时间字符串 "YYYY-MM-DD HH:mm:ss"
-            // 直接解析，不做时区转换
-            const createDate = new Date(key.createdAt.replace(' ', 'T'));
+            // createdAt 是数据库存储的北京时间字符串 "YYYY-MM-DD HH:mm:ss"
+            // 解析时指定为北京时间（UTC+8）
+            const createDateStr = key.createdAt.replace(' ', 'T') + '+08:00';
+            const createDate = new Date(createDateStr);
             // 添加天数
-            expireDate = new Date(createDate);
-            expireDate.setDate(expireDate.getDate() + key.expiresInDays);
-            const now = new Date();
-            // 计算剩余天数时也用本地时间比较
-            const nowLocal = new Date(now.toLocaleString('en-US', { timeZone: 'Asia/Shanghai' }));
-            remainingDays = Math.max(0, Math.ceil((expireDate - nowLocal) / (24 * 60 * 60 * 1000)));
+            expireDate = new Date(createDate.getTime() + key.expiresInDays * 24 * 60 * 60 * 1000);
+            remainingDays = Math.max(0, Math.ceil((expireDate - now) / (24 * 60 * 60 * 1000)));
         }
 
         res.json({

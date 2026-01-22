@@ -879,16 +879,22 @@ export class ApiKeyStore {
         `, [newExpiresInDays, id]);
 
         // 计算新的过期日期和剩余天数（用于返回显示）
+        // createdAt 是数据库存储的北京时间字符串 "YYYY-MM-DD HH:mm:ss"
         const now = new Date();
-        const createDate = new Date(key.createdAt);
+        const createDateStr = key.createdAt.replace(' ', 'T') + '+08:00';
+        const createDate = new Date(createDateStr);
         const newExpireDate = new Date(createDate.getTime() + newExpiresInDays * 24 * 60 * 60 * 1000);
         const remainingDays = Math.max(0, Math.ceil((newExpireDate - now) / (24 * 60 * 60 * 1000)));
+
+        // 格式化过期时间为北京时间字符串
+        const expireDateLocal = new Date(newExpireDate.getTime() + 8 * 60 * 60 * 1000);
+        const expireDateStr = expireDateLocal.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
 
         return {
             previousExpiresInDays: previousDays,
             newExpiresInDays: newExpiresInDays,
             addedDays: days,
-            expireDate: newExpireDate.toISOString(),
+            expireDate: expireDateStr,
             remainingDays: remainingDays
         };
     }
