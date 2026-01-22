@@ -129,9 +129,18 @@ function showToast(message, type = 'success') {
 }
 
 // ============ 工具函数 ============
+function parseDateTime(dateStr) {
+    if (!dateStr) return null;
+    // 如果是 MySQL 格式 (YYYY-MM-DD HH:MM:SS) 且没有时区信息，视为 UTC
+    if (typeof dateStr === 'string' && !dateStr.includes('T') && !dateStr.includes('Z') && !dateStr.includes('+')) {
+        return new Date(dateStr.replace(' ', 'T') + 'Z');
+    }
+    return new Date(dateStr);
+}
+
 function formatDateTime(dateStr) {
     if (!dateStr) return '-';
-    const date = new Date(dateStr);
+    const date = parseDateTime(dateStr);
     return date.toLocaleString('zh-CN', {
         year: 'numeric',
         month: '2-digit',
@@ -143,7 +152,7 @@ function formatDateTime(dateStr) {
 
 function formatDate(dateStr) {
     if (!dateStr) return '-';
-    const date = new Date(dateStr);
+    const date = parseDateTime(dateStr);
     return date.toLocaleDateString('zh-CN');
 }
 
