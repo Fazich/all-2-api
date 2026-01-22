@@ -315,20 +315,12 @@ async function loadKeyLimitsStatus(keyId) {
                     const daysLeft = remaining.days;
 
                     let expireClass = '';
-                    // 直接显示原始时间字符串，不做时区转换
-                    let expireDateStr = expireDate;
-                    // 如果是 ISO 格式 (2026-01-21T14:40:20.000Z)，转换为本地格式显示
-                    if (expireDateStr.includes('T')) {
-                        expireDateStr = expireDateStr.replace('T', ' ').replace(/\.\d{3}Z$/, '');
-                    }
-                    // 格式化为 MM/DD HH:mm:ss
-                    const parts = expireDateStr.split(' ');
-                    if (parts.length === 2) {
-                        const dateParts = parts[0].split('-');
-                        if (dateParts.length === 3) {
-                            expireDateStr = dateParts[1] + '/' + dateParts[2] + ' ' + parts[1];
-                        }
-                    }
+                    // 转换为本地时间格式显示
+                    const month = String(expDate.getMonth() + 1).padStart(2, '0');
+                    const day = String(expDate.getDate()).padStart(2, '0');
+                    const hours = String(expDate.getHours()).padStart(2, '0');
+                    const minutes = String(expDate.getMinutes()).padStart(2, '0');
+                    const expireDateStr = month + '/' + day + ' ' + hours + ':' + minutes;
 
                     if (isExpired) {
                         expireClass = 'danger';
