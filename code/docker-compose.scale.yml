@@ -1,45 +1,73 @@
 version: '3.8'
 
-# 动态扩展版本 - 使用 DNS 发现
+# 动态扩展版本 - 使用外部数据库 + Host 网络模式
 # 用法:
-#   启动: docker-compose -f docker-compose.scale.yml up -d --scale api=5
-#   扩容: docker-compose -f docker-compose.scale.yml up -d --scale api=10 --no-recreate
-#   缩容: docker-compose -f docker-compose.scale.yml up -d --scale api=3 --no-recreate
+#   启动: docker-compose -f docker-compose.scale.yml up -d
+#   扩容: 修改下方 api 实例数量后重新 up
+#
+# 环境变量配置（可在 .env 文件中设置）:
+#   BALANCER_PORT  - 负载均衡器端口 (默认: 13003)
+#   MYSQL_HOST     - MySQL 主机地址 (默认: 127.0.0.1)
+#   MYSQL_PORT     - MySQL 端口 (默认: 3306)
+#   MYSQL_USER     - MySQL 用户名 (默认: root)
+#   MYSQL_PASSWORD - MySQL 密码 (必填)
+#   MYSQL_DATABASE - 数据库名 (默认: kiro_api)
+
+x-api-common: &api-common
+  build: .
+  restart: unless-stopped
+  network_mode: host
+  environment: &api-env
+    TZ: Asia/Shanghai
+    MYSQL_HOST: ${MYSQL_HOST:-127.0.0.1}
+    MYSQL_PORT: ${MYSQL_PORT:-3306}
+    MYSQL_USER: ${MYSQL_USER:-root}
+    MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    MYSQL_DATABASE: ${MYSQL_DATABASE:-kiro_api}
 
 services:
   balancer:
     build: .
     container_name: kiro-balancer
     restart: unless-stopped
-    ports:
-      - "${BALANCER_PORT:-13003}:13003"
+    network_mode: host
     environment:
       - TZ=Asia/Shanghai
-      - BALANCER_PORT=13003
-      - BACKEND_DNS=api
-      - BACKEND_PORT=13004
+      - BALANCER_PORT=${BALANCER_PORT:-13003}
+      - BACKEND_PORTS=13004,13005,13006,13007,13008
     command: ["node", "src/balancer.js"]
-    depends_on:
-      - api
-    networks:
-      - kiro-network
 
-  api:
-    build: .
-    restart: unless-stopped
+  api-1:
+    <<: *api-common
+    container_name: kiro-api-1
     environment:
-      - PORT=13004
-      - TZ=Asia/Shanghai
-      - MYSQL_HOST=${MYSQL_HOST:-host.docker.internal}
-      - MYSQL_PORT=${MYSQL_PORT:-13306}
-      - MYSQL_USER=${MYSQL_USER:-root}
-      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-4561230wW?}
-      - MYSQL_DATABASE=${MYSQL_DATABASE:-kiro_api}
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    networks:
-      - kiro-network
+      <<: *api-env
+      PORT: 13004
 
-networks:
-  kiro-network:
-    driver: bridge
+  api-2:
+    <<: *api-common
+    container_name: kiro-api-2
+    environment:
+      <<: *api-env
+      PORT: 13005
+
+  api-3:
+    <<: *api-common
+    container_name: kiro-api-3
+    environment:
+      <<: *api-env
+      PORT: 13006
+
+  api-4:
+    <<: *api-common
+    container_name: kiro-api-4
+    environment:
+      <<: *api-env
+      PORT: 13007
+
+  api-5:
+    <<: *api-common
+    container_name: kiro-api-5
+    environment:
+      <<: *api-env
+      PORT: 13008
