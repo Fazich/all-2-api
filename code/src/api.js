@@ -6,7 +6,7 @@ import axios from 'axios';
 import { v4 as uuidv4 } from 'uuid';
 import os from 'os';
 import crypto from 'crypto';
-import { KIRO_CONSTANTS, MODEL_MAPPING, KIRO_MODELS } from './constants.js';
+import { KIRO_CONSTANTS, MODEL_MAPPING, KIRO_MODELS, buildCodeWhispererUrl } from './constants.js';
 import { logger } from './logger.js';
 import { getAxiosProxyConfig } from './proxy.js';
 
@@ -637,7 +637,7 @@ export class KiroAPI {
 
         const axiosInstance = createAxiosInstance(credential);
         const requestData = this._buildChatRequest(messages, model, credential, options);
-        const baseUrl = KIRO_CONSTANTS.BASE_URL.replace('{{region}}', region);
+        const baseUrl = buildCodeWhispererUrl(KIRO_CONSTANTS.BASE_URL, region);
 
         const requestHeaders = {
             ...axiosInstance.defaults.headers,
@@ -687,7 +687,7 @@ export class KiroAPI {
 
         const axiosInstance = createAxiosInstance(credential);
         const requestData = this._buildChatRequest(messages, model, credential, options);
-        const baseUrl = KIRO_CONSTANTS.BASE_URL.replace('{{region}}', region);
+        const baseUrl = buildCodeWhispererUrl(KIRO_CONSTANTS.BASE_URL, region);
 
         const requestHeaders = {
             ...axiosInstance.defaults.headers,
@@ -740,7 +740,7 @@ export class KiroAPI {
         }
 
         const axiosInstance = createAxiosInstance(credential);
-        const url = KIRO_CONSTANTS.USAGE_LIMITS_URL.replace('{{region}}', region);
+        const url = buildCodeWhispererUrl(KIRO_CONSTANTS.USAGE_LIMITS_URL, region);
 
         const params = new URLSearchParams({
             isEmailRequired: 'true',
@@ -796,7 +796,7 @@ export class KiroAPI {
         }
 
         const axiosInstance = createAxiosInstance(credential);
-        const url = KIRO_CONSTANTS.LIST_MODELS_URL.replace('{{region}}', region);
+        const url = buildCodeWhispererUrl(KIRO_CONSTANTS.LIST_MODELS_URL, region);
 
         try {
             const fullUrl = `${url}?origin=${KIRO_CONSTANTS.ORIGIN_AI_EDITOR}`;

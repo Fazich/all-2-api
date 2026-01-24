@@ -18,6 +18,19 @@ export const KIRO_CONSTANTS = {
     DEFAULT_REGION: 'us-east-1',
     AXIOS_TIMEOUT: 300000, // 5 分钟超时
 
+    // CodeWhisperer API 实际支持的区域
+    CODEWHISPERER_SUPPORTED_REGIONS: [
+        'us-east-1'  // 目前只有 us-east-1 确认可用
+    ],
+
+    // 区域映射：将所有区域映射到 us-east-1（唯一确认工作的区域）
+    REGION_MAPPING: {
+        'us-east-1': 'us-east-1',
+        'us-west-1': 'us-east-1',  // 映射到 us-east-1
+        'us-west-2': 'us-east-1',  // 映射到 us-east-1
+        'eu-west-1': 'us-east-1'   // 映射到 us-east-1
+    },
+
     // 请求头
     USER_AGENT: 'KiroIDE',
     KIRO_VERSION: '0.7.5',
@@ -35,8 +48,43 @@ export const KIRO_CONSTANTS = {
 };
 
 /**
- * 支持的模型列表
+ * 获取 CodeWhisperer API 支持的区域
+ * 如果用户选择的区域不被支持，返回映射的区域
+ * @param {string} userRegion - 用户选择的区域
+ * @returns {string} CodeWhisperer API 支持的区域
  */
+export function getCodeWhispererRegion(userRegion) {
+    if (!userRegion) {
+        return KIRO_CONSTANTS.DEFAULT_REGION;
+    }
+
+    // 如果直接支持，返回原区域
+    if (KIRO_CONSTANTS.CODEWHISPERER_SUPPORTED_REGIONS.includes(userRegion)) {
+        return userRegion;
+    }
+
+    // 使用映射表
+    const mappedRegion = KIRO_CONSTANTS.REGION_MAPPING[userRegion];
+    if (mappedRegion) {
+        console.log(`[REGION] 映射区域: ${userRegion} -> ${mappedRegion}`);
+        return mappedRegion;
+    }
+
+    // 回退到默认区域
+    console.warn(`[REGION] 不支持的区域 ${userRegion}，使用默认区域 ${KIRO_CONSTANTS.DEFAULT_REGION}`);
+    return KIRO_CONSTANTS.DEFAULT_REGION;
+}
+
+/**
+ * 构建 CodeWhisperer API URL
+ * @param {string} baseUrl - 基础 URL 模板（包含 {{region}} 占位符）
+ * @param {string} userRegion - 用户选择的区域
+ * @returns {string} 完整的 API URL
+ */
+export function buildCodeWhispererUrl(baseUrl, userRegion) {
+    const actualRegion = getCodeWhispererRegion(userRegion);
+    return baseUrl.replace('{{region}}', actualRegion);
+}
 export const KIRO_MODELS = [
     'claude-sonnet-4-20250514',
     'claude-sonnet-4-5-20250929',
@@ -67,11 +115,11 @@ export const MODEL_MAPPING = {
  * OAuth 配置
  */
 export const KIRO_OAUTH_CONFIG = {
-    // Kiro Auth Service 端点 (用于 Social Auth)
-    authServiceEndpoint: 'https://prod.us-east-1.auth.desktop.kiro.dev',
+    // Kiro Auth Service 端点 (用于 Social Auth) - 支持多区域
+    authServiceEndpoint: 'https://prod.{{region}}.auth.desktop.kiro.dev',
 
-    // AWS SSO OIDC 端点 (用于 Builder ID)
-    ssoOIDCEndpoint: 'https://oidc.us-east-1.amazonaws.com',
+    // AWS SSO OIDC 端点 (用于 Builder ID) - 支持多区域
+    ssoOIDCEndpoint: 'https://oidc.{{region}}.amazonaws.com',
 
     // AWS Builder ID 起始 URL
     builderIDStartURL: 'https://view.awsapps.com/start',
@@ -96,6 +144,14 @@ export const KIRO_OAUTH_CONFIG = {
     // 凭据存储
     credentialsDir: '.kiro',
     credentialsFile: 'oauth_creds.json',
+
+    // 支持的区域列表
+    supportedRegions: [
+        'us-east-1',
+        'us-west-1',
+        'us-west-2',
+        'eu-west-1'
+    ]
 };
 
 /**

@@ -4,7 +4,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
-import { KIRO_CONSTANTS, MODEL_MAPPING, KIRO_MODELS, KIRO_OAUTH_CONFIG } from './constants.js';
+import { KIRO_CONSTANTS, MODEL_MAPPING, KIRO_MODELS, KIRO_OAUTH_CONFIG, buildCodeWhispererUrl } from './constants.js';
 import { CredentialStore } from './db.js';
 import { logger } from './logger.js';
 import { getAxiosProxyConfig } from './proxy.js';
@@ -924,7 +924,7 @@ export class KiroClient {
         // }
 
         const requestData = this._buildRequest(messages, model, options);
-        const baseUrl = KIRO_CONSTANTS.BASE_URL.replace('{{region}}', this.region);
+        const baseUrl = buildCodeWhispererUrl(KIRO_CONSTANTS.BASE_URL, this.region);
 
         const requestHeaders = {
             ...this.axiosInstance.defaults.headers,
@@ -959,7 +959,7 @@ export class KiroClient {
         // }
 
         const requestData = this._buildRequest(messages, model, options);
-        const baseUrl = KIRO_CONSTANTS.BASE_URL.replace('{{region}}', this.region);
+        const baseUrl = buildCodeWhispererUrl(KIRO_CONSTANTS.BASE_URL, this.region);
 
         const requestHeaders = {
             ...this.axiosInstance.defaults.headers,
@@ -1107,7 +1107,7 @@ export class KiroClient {
      * 从 API 获取可用模型列表
      */
     async listAvailableModels() {
-        const url = KIRO_CONSTANTS.LIST_MODELS_URL.replace('{{region}}', this.region);
+        const url = buildCodeWhispererUrl(KIRO_CONSTANTS.LIST_MODELS_URL, this.region);
 
         const requestHeaders = {
             ...this.axiosInstance.defaults.headers,
@@ -1134,7 +1134,7 @@ export class KiroClient {
      * 获取使用限额
      */
     async getUsageLimits() {
-        const url = KIRO_CONSTANTS.USAGE_LIMITS_URL.replace('{{region}}', this.region);
+        const url = buildCodeWhispererUrl(KIRO_CONSTANTS.USAGE_LIMITS_URL, this.region);
 
         // 构建查询参数（参考 AIClient-2-API）
         const params = new URLSearchParams({

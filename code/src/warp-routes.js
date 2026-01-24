@@ -1831,21 +1831,92 @@ export async function setupWarpRoutes(app, warpStore, warpService, apiKeyStore) 
                             
                             if (tc.toolName === 'Write' || tc.command === 'create_documents') {
                                 toolName = 'Write';
-                                // 如果工具调用内容为空，使用之前收集的文本内容
-                                const writeContent = tc.content || text || '';
-                                // Claude Code 只接受 file_path 和 content，不接受 description
-                                input = { 
-                                    file_path: tc.filePath || 'output.md',
+
+                                // 调试：打印原始工具调用信息
+                                console.log(`  [TOOL DEBUG] Original tool call:`, {
+                                    toolName: tc.toolName,
+                                    command: tc.command,
+                                    filePath: tc.filePath,
+                                    file_path: tc.file_path,
+                                    path: tc.path,
+                                    content: tc.content?.substring(0, 100) + '...',
+                                    input: tc.input
+                                });
+
+                                // 更智能的文件路径提取
+                                let filePath = tc.filePath || tc.file_path || tc.path ||
+                                              (tc.input && tc.input.file_path) ||
+                                              (tc.input && tc.input.path);
+
+                                // 如果没有明确的文件路径，根据内容推断
+                                if (!filePath) {
+                                    const contentToCheck = tc.content || text || '';
+                                    if (contentToCheck.includes('<!doctype html') || contentToCheck.includes('<html')) {
+                                        filePath = 'login.html';
+                                    } else if (contentToCheck.includes('function ') || contentToCheck.includes('const ') || contentToCheck.includes('import ')) {
+                                        filePath = 'script.js';
+                                    } else if (contentToCheck.includes('{') && contentToCheck.includes('}') && contentToCheck.includes(':')) {
+                                        filePath = 'data.json';
+                                    } else {
+                                        filePath = 'output.md';
+                                    }
+                                    console.log(`  [TOOL] Inferred file type: ${filePath}`);
+                                }
+
+                                // 更完整的内容提取 - 关键修复：优先使用 text 内容
+                                let writeContent = '';
+
+                                // 1. 首先尝试工具调用中的内容
+                                if (tc.content && tc.content.trim()) {
+                                    writeContent = tc.content;
+                                } else if (tc.input && tc.input.content && tc.input.content.trim()) {
+                                    writeContent = tc.input.content;
+                                }
+                                // 2. 如果工具调用内容为空或只是描述，使用响应文本
+                                else if (text && text.trim() && text.length > 100) {
+                                    writeContent = text;
+                                    console.log(`  [TOOL FIX] Using response text as Write content (${text.length} chars)`);
+                                }
+                                // 3. 最后的回退
+                                else {
+                                    writeContent = tc.content || text || '';
+                                }
+
+                                // 参数验证
+                                if (!writeContent || writeContent.length < 10) {
+                                    console.warn(`  [TOOL WARN] Write tool has insufficient content (${writeContent.length} chars)`);
+                                }
+
+                                input = {
+                                    file_path: filePath,
                                     content: writeContent
                                 };
+
                                 console.log(`  [TOOL] Write: file_path=${input.file_path}, content.length=${writeContent.length}`);
+                                console.log(`  [TOOL DEBUG] Processed input:`, {
+                                    file_path: input.file_path,
+                                    content_length: input.content?.length || 0,
+                                    content_preview: input.content?.substring(0, 100) + '...'
+                                });
                             }
                             
                             // 确保只传递必要的字段，移除可能的额外字段
                             const cleanInput = {};
                             if (toolName === 'Write') {
+                                // 参数验证和修复
+                                if (!input.file_path || input.file_path === 'undefined') {
+                                    console.warn(`  [TOOL WARN] Invalid file_path: ${input.file_path}, using default`);
+                                    input.file_path = 'output.md';
+                                }
+                                if (!input.content) {
+                                    console.warn(`  [TOOL WARN] Empty content for Write tool`);
+                                    input.content = '';
+                                }
+
                                 cleanInput.file_path = input.file_path;
                                 cleanInput.content = input.content;
+
+                                console.log(`  [TOOL FINAL] Write params: file_path="${cleanInput.file_path}", content_length=${cleanInput.content.length}`);
                             } else {
                                 cleanInput.command = input.command;
                             }
@@ -1978,20 +2049,92 @@ export async function setupWarpRoutes(app, warpStore, warpService, apiKeyStore) 
                         
                         if (tc.toolName === 'Write' || tc.command === 'create_documents') {
                             toolName = 'Write';
-                            // 如果工具调用内容为空，使用之前收集的文本内容
-                            const writeContent = tc.content || finalResponse || '';
-                            input = { 
-                                file_path: tc.filePath || 'output.md',
+
+                            // 调试：打印原始工具调用信息
+                            console.log(`  [TOOL DEBUG] Original tool call (non-stream):`, {
+                                toolName: tc.toolName,
+                                command: tc.command,
+                                filePath: tc.filePath,
+                                file_path: tc.file_path,
+                                path: tc.path,
+                                content: tc.content?.substring(0, 100) + '...',
+                                input: tc.input
+                            });
+
+                            // 更智能的文件路径提取
+                            let filePath = tc.filePath || tc.file_path || tc.path ||
+                                          (tc.input && tc.input.file_path) ||
+                                          (tc.input && tc.input.path);
+
+                            // 如果没有明确的文件路径，根据内容推断
+                            if (!filePath) {
+                                const contentToCheck = tc.content || finalResponse || '';
+                                if (contentToCheck.includes('<!doctype html') || contentToCheck.includes('<html')) {
+                                    filePath = 'login.html';
+                                } else if (contentToCheck.includes('function ') || contentToCheck.includes('const ') || contentToCheck.includes('import ')) {
+                                    filePath = 'script.js';
+                                } else if (contentToCheck.includes('{') && contentToCheck.includes('}') && contentToCheck.includes(':')) {
+                                    filePath = 'data.json';
+                                } else {
+                                    filePath = 'output.md';
+                                }
+                                console.log(`  [TOOL] Inferred file type (non-stream): ${filePath}`);
+                            }
+
+                            // 更完整的内容提取 - 关键修复：优先使用 finalResponse 内容
+                            let writeContent = '';
+
+                            // 1. 首先尝试工具调用中的内容
+                            if (tc.content && tc.content.trim()) {
+                                writeContent = tc.content;
+                            } else if (tc.input && tc.input.content && tc.input.content.trim()) {
+                                writeContent = tc.input.content;
+                            }
+                            // 2. 如果工具调用内容为空或只是描述，使用响应文本
+                            else if (finalResponse && finalResponse.trim() && finalResponse.length > 100) {
+                                writeContent = finalResponse;
+                                console.log(`  [TOOL FIX] Using response text as Write content (${finalResponse.length} chars)`);
+                            }
+                            // 3. 最后的回退
+                            else {
+                                writeContent = tc.content || finalResponse || '';
+                            }
+
+                            // 参数验证
+                            if (!writeContent || writeContent.length < 10) {
+                                console.warn(`  [TOOL WARN] Write tool has insufficient content (${writeContent.length} chars)`);
+                            }
+
+                            input = {
+                                file_path: filePath,
                                 content: writeContent
                             };
+
                             console.log(`  [TOOL] Write: file_path=${input.file_path}, content.length=${writeContent.length}`);
+                            console.log(`  [TOOL DEBUG] Processed input (non-stream):`, {
+                                file_path: input.file_path,
+                                content_length: input.content?.length || 0,
+                                content_preview: input.content?.substring(0, 100) + '...'
+                            });
                         }
                         
                         // 确保只传递必要的字段，移除可能的额外字段如 description
                         const cleanInput = {};
                         if (toolName === 'Write') {
+                            // 参数验证和修复
+                            if (!input.file_path || input.file_path === 'undefined') {
+                                console.warn(`  [TOOL WARN] Invalid file_path: ${input.file_path}, using default`);
+                                input.file_path = 'output.md';
+                            }
+                            if (!input.content) {
+                                console.warn(`  [TOOL WARN] Empty content for Write tool`);
+                                input.content = '';
+                            }
+
                             cleanInput.file_path = input.file_path;
                             cleanInput.content = input.content;
+
+                            console.log(`  [TOOL FINAL] Write params (non-stream): file_path="${cleanInput.file_path}", content_length=${cleanInput.content.length}`);
                         } else {
                             cleanInput.command = input.command;
                         }
