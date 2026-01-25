@@ -1713,7 +1713,7 @@ app.post('/v1/messages', async (req, res) => {
                 logData.credentialId = credential.id;
                 logData.credentialName = credential.name;
 
-                // console.log(`[${getTimestamp()}] [API] 使用凭据 ${credential.id} (${credential.name})`);
+                console.log(`[${getTimestamp()}] [API] 使用账号: ${credential.name}`);
 
                 // 发送 message_start 事件
                 res.write(`event: message_start\ndata: ${JSON.stringify({
@@ -1862,6 +1862,8 @@ app.post('/v1/messages', async (req, res) => {
                 credential = result.credential;
                 logData.credentialId = credential.id;
                 logData.credentialName = credential.name;
+
+                console.log(`[${getTimestamp()}] [API] 使用账号: ${credential.name}`);
 
                 const response = result.response;
 
