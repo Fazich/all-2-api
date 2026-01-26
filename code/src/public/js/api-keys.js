@@ -95,8 +95,16 @@ function renderApiKeys() {
         return;
     }
 
+    // 按最后使用时间排序，最新的在最上面（未使用的排在最后）
+    const sortedKeys = [...apiKeys].sort((a, b) => {
+        if (!a.lastUsedAt && !b.lastUsedAt) return 0;
+        if (!a.lastUsedAt) return 1;
+        if (!b.lastUsedAt) return -1;
+        return new Date(b.lastUsedAt) - new Date(a.lastUsedAt);
+    });
+
     emptyState.style.display = 'none';
-    list.innerHTML = apiKeys.map(function(key) {
+    list.innerHTML = sortedKeys.map(function(key) {
         const statusClass = key.isActive ? 'success' : 'error';
         const statusText = key.isActive ? '启用' : '禁用';
         const keyDisplay = key.keyValue || key.keyPrefix || '***';
@@ -144,7 +152,7 @@ function renderApiKeys() {
     });
 
     // 加载用量统计
-    apiKeys.forEach(function(key) {
+    sortedKeys.forEach(function(key) {
         loadKeyLimitsStatus(key.id);
     });
 }

@@ -1457,6 +1457,43 @@ export class ApiLogStore {
             outputTokens: Number(row.outputTokens) || 0
         }));
     }
+
+    async getStatsByTimeInterval(options = {}) {
+        const { startDate, endDate, apiKeyId, intervalMinutes = 20 } = options;
+        let query = `
+            SELECT
+                FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(created_at) / (? * 60)) * (? * 60)) as time_slot,
+                COUNT(*) as requestCount,
+                COALESCE(SUM(input_tokens), 0) as inputTokens,
+                COALESCE(SUM(output_tokens), 0) as outputTokens
+            FROM api_logs
+            WHERE 1=1
+        `;
+        const params = [intervalMinutes, intervalMinutes];
+
+        if (apiKeyId) {
+            query += ' AND api_key_id = ?';
+            params.push(apiKeyId);
+        }
+        if (startDate) {
+            query += ' AND created_at >= ?';
+            params.push(startDate);
+        }
+        if (endDate) {
+            query += ' AND created_at <= ?';
+            params.push(endDate);
+        }
+
+        query += ' GROUP BY time_slot ORDER BY time_slot ASC';
+
+        const [rows] = await this.db.execute(query, params);
+        return rows.map(row => ({
+            timeSlot: row.time_slot,
+            requestCount: Number(row.requestCount) || 0,
+            inputTokens: Number(row.inputTokens) || 0,
+            outputTokens: Number(row.outputTokens) || 0
+        }));
+    }
 }
 
 /**

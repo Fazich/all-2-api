@@ -236,11 +236,35 @@
             background: var(--bg-primary);
             padding: 10px;
             border-radius: 6px;
-            cursor: pointer;
-            transition: background var(--transition-fast);
+            flex: 1;
+            border: 1px solid var(--border-color);
         }
-        .api-key-value:hover {
-            background: var(--bg-tertiary);
+        .api-key-wrapper {
+            display: flex;
+            gap: 8px;
+            align-items: stretch;
+        }
+        .btn-copy {
+            padding: 10px 16px;
+            background: var(--accent-primary);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all var(--transition-fast);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .btn-copy:hover {
+            background: var(--accent-primary-hover);
+        }
+        .btn-copy svg {
+            width: 16px;
+            height: 16px;
         }
         .api-key-hint {
             font-size: 11px;
@@ -285,6 +309,9 @@
         .copy-toast.show {
             transform: translateX(-50%) translateY(0);
             opacity: 1;
+        }
+        .copy-toast.error {
+            background: var(--accent-danger);
         }
         @media (max-width: 768px) {
             .public-header {
@@ -357,8 +384,17 @@
 
                     <div class="api-key-box" id="api-key-box" style="display: none;">
                         <div class="api-key-label">您的 API Key</div>
-                        <div class="api-key-value" id="api-key-value" onclick="copyApiKey()"></div>
-                        <div class="api-key-hint">点击复制 API Key</div>
+                        <div class="api-key-wrapper">
+                            <input type="text" class="api-key-value" id="api-key-value" readonly>
+                            <button type="button" class="btn-copy" onclick="copyApiKey()">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                                </svg>
+                                复制
+                            </button>
+                        </div>
+                        <div class="api-key-hint">请妥善保管您的 API Key</div>
                         <div class="expire-warning" id="expire-warning"></div>
                     </div>
                 </div>
@@ -373,6 +409,44 @@
     <div class="copy-toast" id="copy-toast">已复制到剪贴板</div>
 
     <script>
+        // 兼容性复制函数
+        function copyToClipboard(text) {
+            // 优先使用现代 API
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                return navigator.clipboard.writeText(text);
+            }
+            // 降级方案：使用 execCommand
+            return new Promise((resolve, reject) => {
+                const textArea = document.createElement('textarea');
+                textArea.value = text;
+                textArea.style.position = 'fixed';
+                textArea.style.left = '-9999px';
+                textArea.style.top = '-9999px';
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+                try {
+                    const successful = document.execCommand('copy');
+                    document.body.removeChild(textArea);
+                    if (successful) {
+                        resolve();
+                    } else {
+                        reject(new Error('execCommand copy failed'));
+                    }
+                } catch (err) {
+                    document.body.removeChild(textArea);
+                    reject(err);
+                }
+            });
+        }
+
+        function showToast(message, isError = false) {
+            const toast = document.getElementById('copy-toast');
+            toast.textContent = message;
+            toast.className = isError ? 'copy-toast show error' : 'copy-toast show';
+            setTimeout(() => toast.classList.remove('show'), 2000);
+        }
+
         function showMessage(text, type) {
             const msg = document.getElementById('message');
             msg.textContent = text;
@@ -407,12 +481,18 @@
         }
 
         function copyApiKey() {
-            const apiKey = document.getElementById('api-key-value').textContent;
-            navigator.clipboard.writeText(apiKey).then(() => {
-                const toast = document.getElementById('copy-toast');
-                toast.classList.add('show');
-                setTimeout(() => toast.classList.remove('show'), 2000);
-            });
+            const apiKey = document.getElementById('api-key-value').value;
+            if (!apiKey) return;
+
+            copyToClipboard(apiKey)
+                .then(() => showToast('已复制到剪贴板'))
+                .catch(() => {
+                    // 如果复制失败，选中文本让用户手动复制
+                    const input = document.getElementById('api-key-value');
+                    input.select();
+                    input.setSelectionRange(0, 99999);
+                    showToast('请按 Ctrl+C 手动复制', true);
+                });
         }
 
         document.getElementById('query-form').addEventListener('submit', async (e) => {
@@ -466,7 +546,7 @@
                     // API Key
                     const apiKeyBox = document.getElementById('api-key-box');
                     if (app.status === 'approved' && app.apiKey) {
-                        document.getElementById('api-key-value').textContent = app.apiKey;
+                        document.getElementById('api-key-value').value = app.apiKey;
 
                         // 过期时间
                         const expireWarning = document.getElementById('expire-warning');

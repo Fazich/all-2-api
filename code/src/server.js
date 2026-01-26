@@ -4476,6 +4476,28 @@ app.get('/api/logs-stats/by-date', authMiddleware, async (req, res) => {
     }
 });
 
+// 获取按时间间隔统计的用量（默认20分钟）
+app.get('/api/logs-stats/by-interval', authMiddleware, async (req, res) => {
+    try {
+        if (!req.user.isAdmin) {
+            return res.status(403).json({ success: false, error: '需要管理员权限' });
+        }
+
+        const { startDate, endDate, apiKeyId, interval } = req.query;
+
+        const stats = await apiLogStore.getStatsByTimeInterval({
+            startDate,
+            endDate,
+            apiKeyId: apiKeyId ? parseInt(apiKeyId) : undefined,
+            intervalMinutes: interval ? parseInt(interval) : 20
+        });
+
+        res.json({ success: true, data: stats });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 // 流式对话
 app.post('/api/chat/:id', async (req, res) => {
     const credentialId = parseInt(req.params.id);

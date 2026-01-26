@@ -228,6 +228,167 @@
         .hidden-input {
             display: none;
         }
+        /* 步骤说明 */
+        .steps-guide {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 20px;
+            margin-bottom: 24px;
+        }
+        .steps-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .steps-title svg {
+            width: 18px;
+            height: 18px;
+            color: var(--accent-primary);
+        }
+        .steps-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .step-item {
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+        }
+        .step-number {
+            width: 24px;
+            height: 24px;
+            min-width: 24px;
+            background: linear-gradient(135deg, var(--accent-primary), var(--accent-purple));
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 600;
+            color: white;
+        }
+        .step-content {
+            flex: 1;
+        }
+        .step-content strong {
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+        .step-content p {
+            font-size: 13px;
+            color: var(--text-secondary);
+            margin: 0;
+            line-height: 1.5;
+        }
+        /* 成功结果卡片 */
+        .success-card {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--accent-success);
+            border-radius: var(--radius-md);
+            padding: 24px;
+            margin-top: 20px;
+            display: none;
+        }
+        .success-card.show {
+            display: block;
+        }
+        .success-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-bottom: 16px;
+            color: var(--accent-success);
+        }
+        .success-header svg {
+            width: 24px;
+            height: 24px;
+        }
+        .success-header span {
+            font-size: 16px;
+            font-weight: 600;
+        }
+        .api-key-wrapper {
+            display: flex;
+            gap: 8px;
+            align-items: stretch;
+        }
+        .api-key-box {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 16px;
+        }
+        .api-key-label {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-bottom: 8px;
+        }
+        .api-key-input {
+            flex: 1;
+            font-family: 'Monaco', 'Menlo', 'Consolas', monospace;
+            font-size: 13px;
+            color: var(--text-primary);
+            background: var(--bg-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            padding: 10px 12px;
+            word-break: break-all;
+            user-select: all;
+        }
+        .btn-copy {
+            padding: 10px 16px;
+            background: var(--accent-primary);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 500;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: all var(--transition-fast);
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .btn-copy:hover {
+            background: var(--accent-primary-hover);
+        }
+        .btn-copy svg {
+            width: 16px;
+            height: 16px;
+        }
+        .api-key-hint {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-top: 12px;
+        }
+        .copy-toast {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%) translateY(100px);
+            background: var(--accent-success);
+            color: white;
+            padding: 10px 20px;
+            border-radius: var(--radius-md);
+            font-size: 13px;
+            opacity: 0;
+            transition: all 0.3s ease;
+            z-index: 1000;
+        }
+        .copy-toast.show {
+            transform: translateX(-50%) translateY(0);
+            opacity: 1;
+        }
+        .copy-toast.error {
+            background: var(--accent-danger);
+        }
         @media (max-width: 768px) {
             .public-header {
                 padding: 16px 20px;
@@ -261,6 +422,68 @@
                 <p class="page-subtitle">填写以下信息申请 API 试用资格</p>
 
                 <div class="message" id="message"></div>
+
+                <!-- 步骤说明 -->
+                <div class="steps-guide">
+                    <div class="steps-title">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+                            <path d="M9 12l2 2 4-4"/>
+                        </svg>
+                        申请流程
+                    </div>
+                    <div class="steps-list">
+                        <div class="step-item">
+                            <div class="step-number">1</div>
+                            <div class="step-content">
+                                <p><strong>填写信息</strong> - 填写咸鱼名称、邮箱等基本信息</p>
+                            </div>
+                        </div>
+                        <div class="step-item">
+                            <div class="step-number">2</div>
+                            <div class="step-content">
+                                <p><strong>上传截图</strong> - 如有咸鱼订单，上传截图可加快审批</p>
+                            </div>
+                        </div>
+                        <div class="step-item">
+                            <div class="step-number">3</div>
+                            <div class="step-content">
+                                <p><strong>等待审核</strong> - 提交后等待管理员审核（通常 24 小时内）</p>
+                            </div>
+                        </div>
+                        <div class="step-item">
+                            <div class="step-number">4</div>
+                            <div class="step-content">
+                                <p><strong>获取 Key</strong> - 审核通过后，在此页面或查询页面获取 API Key</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 成功结果卡片 -->
+                <div class="success-card" id="success-card">
+                    <div class="success-header">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                            <polyline points="22 4 12 14.01 9 11.01"/>
+                        </svg>
+                        <span>申请已通过，以下是您的 API Key</span>
+                    </div>
+                    <div class="api-key-box">
+                        <div class="api-key-label">API Key</div>
+                        <div class="api-key-wrapper">
+                            <input type="text" class="api-key-input" id="api-key-input" readonly>
+                            <button type="button" class="btn-copy" onclick="copyApiKey()">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>
+                                    <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>
+                                </svg>
+                                复制
+                            </button>
+                        </div>
+                        <div class="api-key-hint">请妥善保管您的 API Key，不要泄露给他人。如需帮助，请查看 <a href="/pages/docs.html">接入教程</a></div>
+                    </div>
+                </div>
 
                 <form id="apply-form">
                     <div class="form-group">
@@ -311,11 +534,77 @@
         </main>
     </div>
 
+    <div class="copy-toast" id="copy-toast">已复制到剪贴板</div>
+
     <script>
         const uploadArea = document.getElementById('upload-area');
         const screenshotInput = document.getElementById('screenshot-input');
         const preview = document.getElementById('preview');
         let screenshotBase64 = null;
+
+        // 兼容性复制函数
+        function copyToClipboard(text) {
+            // 优先使用现代 API
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                return navigator.clipboard.writeText(text);
+            }
+            // 降级方案：使用 execCommand
+            return new Promise((resolve, reject) => {
+                const textArea = document.createElement('textarea');
+                textArea.value = text;
+                textArea.style.position = 'fixed';
+                textArea.style.left = '-9999px';
+                textArea.style.top = '-9999px';
+                document.body.appendChild(textArea);
+                textArea.focus();
+                textArea.select();
+                try {
+                    const successful = document.execCommand('copy');
+                    document.body.removeChild(textArea);
+                    if (successful) {
+                        resolve();
+                    } else {
+                        reject(new Error('execCommand copy failed'));
+                    }
+                } catch (err) {
+                    document.body.removeChild(textArea);
+                    reject(err);
+                }
+            });
+        }
+
+        function showToast(message, isError = false) {
+            const toast = document.getElementById('copy-toast');
+            toast.textContent = message;
+            toast.className = isError ? 'copy-toast show error' : 'copy-toast show';
+            setTimeout(() => toast.classList.remove('show'), 2000);
+        }
+
+        function copyApiKey() {
+            const apiKey = document.getElementById('api-key-input').value;
+            if (!apiKey) return;
+
+            copyToClipboard(apiKey)
+                .then(() => showToast('已复制到剪贴板'))
+                .catch(() => {
+                    // 如果复制失败，选中文本让用户手动复制
+                    const input = document.getElementById('api-key-input');
+                    input.select();
+                    input.setSelectionRange(0, 99999);
+                    showToast('请按 Ctrl+C 手动复制', true);
+                });
+        }
+
+        function showSuccessCard(apiKey) {
+            document.getElementById('api-key-input').value = apiKey;
+            document.getElementById('success-card').classList.add('show');
+            document.getElementById('apply-form').style.display = 'none';
+        }
+
+        function hideSuccessCard() {
+            document.getElementById('success-card').classList.remove('show');
+            document.getElementById('apply-form').style.display = 'block';
+        }
 
         // 点击上传区域触发文件选择
         uploadArea.addEventListener('click', () => screenshotInput.click());
@@ -406,14 +695,26 @@
                 const data = await res.json();
 
                 if (data.success) {
-                    showMessage('申请提交成功！请等待审核，审核结果将通过邮箱通知。', 'success');
-                    document.getElementById('apply-form').reset();
-                    preview.style.display = 'none';
-                    uploadArea.classList.remove('has-file');
-                    uploadArea.querySelector('.upload-text').textContent = '点击或拖拽上传截图';
-                    screenshotBase64 = null;
+                    // 检查是否返回了 API Key（已通过的申请）
+                    if (data.data && data.data.apiKey) {
+                        showSuccessCard(data.data.apiKey);
+                        showMessage('您的申请已通过，API Key 如下', 'success');
+                    } else {
+                        showMessage('申请提交成功！请等待审核，审核结果将通过邮箱通知。', 'success');
+                        document.getElementById('apply-form').reset();
+                        preview.style.display = 'none';
+                        uploadArea.classList.remove('has-file');
+                        uploadArea.querySelector('.upload-text').textContent = '点击或拖拽上传截图';
+                        screenshotBase64 = null;
+                    }
                 } else {
-                    showMessage(data.error || '提交失败，请重试', 'error');
+                    // 检查是否是已存在且已通过的申请
+                    if (data.data && data.data.apiKey) {
+                        showSuccessCard(data.data.apiKey);
+                        showMessage('您已有通过的申请，API Key 如下', 'success');
+                    } else {
+                        showMessage(data.error || '提交失败，请重试', 'error');
+                    }
                 }
             } catch (error) {
                 showMessage('网络错误，请重试', 'error');
