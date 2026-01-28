@@ -1,4 +1,4 @@
-# ALL-2-API 🚀
+![3478087c6020b0dd08e3225ad6449625](https://github.com/user-attachments/assets/543e9320-e460-46f8-a0b5-83edf7188a41)# ALL-2-API 🚀
 
 一个强大的 API 代理服务，通过 Kiro API 和 Gemini Antigravity API 免费使用 Claude/Gemini 顶级模型，并封装为标准 OpenAI 兼容接口。
 
@@ -151,7 +151,8 @@ docker-compose -f docker-compose.external-db.yml up -d
 
 ### 交流群
 
-![qr](https://github.com/CaiGaoQing/kiro-api-client/blob/main/qr.jpg?raw=true)
+![3478087c6020b0dd08e3225ad6449625](https://github.com/user-attachments/assets/385faf5b-aa4a-41ff-b429-7b36c94034c1)
+
 
 ---
 
