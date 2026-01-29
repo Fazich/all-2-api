@@ -326,6 +326,80 @@ export class KiroClient {
     }
 
     /**
+     * 压缩消息上下文（用于 400 ValidationException 重试）
+     * 策略：保留第一条和最后几条消息，移除中间的消息
+     * @param {Array} messages - 原始消息数组
+     * @param {number} compressionLevel - 压缩级别 (1-3)
+     * @returns {Array} 压缩后的消息数组
+     */
+    _compressMessages(messages, compressionLevel = 1) {
+        if (!messages || messages.length <= 3) {
+            return messages;
+        }
+
+        const keepRecent = Math.max(2, 6 - compressionLevel * 2); // 级别1保留4条，级别2保留2条，级别3保留2条
+        const maxContentLength = Math.max(500, 2000 - compressionLevel * 500); // 逐步减少内容长度
+
+        log.warn(`[上下文压缩] 级别 ${compressionLevel} | 原始消息数: ${messages.length} | 保留最近: ${keepRecent} 条`);
+
+        // 分离第一条消息（通常是 system 或重要的 user 消息）和最后几条
+        const firstMessage = messages[0];
+        const recentMessages = messages.slice(-keepRecent);
+        
+        // 如果第一条消息在 recent 中，直接返回 recent
+        if (messages.length <= keepRecent + 1) {
+            return this._truncateMessageContent(messages, maxContentLength);
+        }
+
+        // 中间消息生成摘要
+        const middleMessages = messages.slice(1, -keepRecent);
+        let summaryText = `[历史对话已压缩，共 ${middleMessages.length} 条消息]`;
+        
+        // 如果压缩级别较低，保留部分中间消息的摘要
+        if (compressionLevel === 1 && middleMessages.length > 0) {
+            const summaries = middleMessages.slice(0, 3).map(msg => {
+                const content = this._getContentText(msg);
+                const truncated = content.length > 100 ? content.substring(0, 100) + '...' : content;
+                return `[${msg.role}]: ${truncated}`;
+            });
+            if (middleMessages.length > 3) {
+                summaries.push(`... 省略 ${middleMessages.length - 3} 条消息 ...`);
+            }
+            summaryText = summaries.join('\n');
+        }
+
+        // 构建压缩后的消息数组
+        const compressed = [
+            firstMessage,
+            { role: 'user', content: summaryText },
+            { role: 'assistant', content: '好的，我了解了之前的对话上下文。' },
+            ...recentMessages
+        ];
+
+        // 截断过长的内容
+        const result = this._truncateMessageContent(compressed, maxContentLength);
+        
+        log.warn(`[上下文压缩] 压缩后消息数: ${result.length}`);
+        return result;
+    }
+
+    /**
+     * 截断消息内容
+     */
+    _truncateMessageContent(messages, maxLength) {
+        return messages.map(msg => {
+            const content = this._getContentText(msg);
+            if (content.length > maxLength) {
+                return {
+                    ...msg,
+                    content: content.substring(0, maxLength) + `\n[内容已截断，原长度: ${content.length}]`
+                };
+            }
+            return msg;
+        });
+    }
+
+    /**
      * 构建请求体
      */
     _buildRequest(messages, model, options = {}) {
@@ -969,7 +1043,10 @@ export class KiroClient {
         //     await this.ensureValidToken();
         // }
 
-        const requestData = this._buildRequest(messages, model, options);
+        const compressionLevel = options._compressionLevel || 0;
+        const currentMessages = compressionLevel > 0 ? this._compressMessages(messages, compressionLevel) : messages;
+
+        const requestData = this._buildRequest(currentMessages, model, options);
         const baseUrl = buildCodeWhispererUrl(KIRO_CONSTANTS.BASE_URL, this.region);
 
         const requestHeaders = {
@@ -979,16 +1056,36 @@ export class KiroClient {
         };
         log.curl('POST', baseUrl, requestHeaders, requestData);
 
-        const response = await this._callWithRetry(async () => {
-            return await this.axiosInstance.post(baseUrl, requestData, {
-                headers: {
-                    'Authorization': `Bearer ${this.accessToken}`,
-                    'amz-sdk-invocation-id': uuidv4()
-                }
+        try {
+            const response = await this._callWithRetry(async () => {
+                return await this.axiosInstance.post(baseUrl, requestData, {
+                    headers: {
+                        'Authorization': `Bearer ${this.accessToken}`,
+                        'amz-sdk-invocation-id': uuidv4()
+                    }
+                });
             });
-        });
 
-        return this._parseResponse(response.data);
+            return this._parseResponse(response.data);
+        } catch (error) {
+            // 400 ValidationException - 尝试压缩上下文后重试
+            if (error.status === 400 && compressionLevel < 3) {
+                const newCompressionLevel = compressionLevel + 1;
+                log.warn(`非流式请求收到 400，尝试压缩上下文 (级别 ${newCompressionLevel}) 后重试...`);
+                
+                const compressedMessages = this._compressMessages(messages, newCompressionLevel);
+                
+                // 如果压缩后消息数量没有变化，说明无法再压缩，直接报错
+                if (compressedMessages.length >= messages.length && newCompressionLevel > 1) {
+                    log.error('上下文已无法继续压缩，放弃重试');
+                    throw error;
+                }
+                
+                return this.chat(messages, model, { ...options, _compressionLevel: newCompressionLevel });
+            }
+            
+            throw error;
+        }
     }
 
     /**
@@ -1096,6 +1193,23 @@ export class KiroClient {
                 const refreshed = await this.refreshAccessToken();
                 if (refreshed) {
                     yield* this.chatStream(messages, model, options, retryCount + 1);
+                    return;
+                }
+            }
+
+            // 400 ValidationException - 尝试压缩上下文后重试
+            const compressionLevel = options._compressionLevel || 0;
+            if (status === 400 && this._isValidationException(error) && compressionLevel < 3) {
+                const newCompressionLevel = compressionLevel + 1;
+                log.warn(`流式请求收到 400 ValidationException，尝试压缩上下文 (级别 ${newCompressionLevel}) 后重试...`);
+                
+                const compressedMessages = this._compressMessages(messages, newCompressionLevel);
+                
+                // 如果压缩后消息数量没有变化，说明无法再压缩，直接报错
+                if (compressedMessages.length >= messages.length && newCompressionLevel > 1) {
+                    log.error('上下文已无法继续压缩，放弃重试');
+                } else {
+                    yield* this.chatStream(compressedMessages, model, { ...options, _compressionLevel: newCompressionLevel }, 0);
                     return;
                 }
             }
