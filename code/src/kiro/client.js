@@ -85,7 +85,7 @@ export class KiroClient {
                 'x-amzn-kiro-agent-mode': 'spec',
                 'x-amz-user-agent': `aws-sdk-js/1.0.0 KiroIDE-${kiroVersion}-${machineId}`,
                 'user-agent': `aws-sdk-js/1.0.0 ua/2.1 os/${osName} lang/js md/nodejs#${nodeVersion} api/codewhispererruntime#1.0.0 m/E KiroIDE-${kiroVersion}-${machineId}`,
-                'Connection': 'close'
+                'Connection': 'keep-alive'
             }
         });
     }
@@ -1068,20 +1068,29 @@ export class KiroClient {
 
             return this._parseResponse(response.data);
         } catch (error) {
-            // 400 ValidationException - 尝试压缩上下文后重试
-            if (error.status === 400 && compressionLevel < 3) {
-                const newCompressionLevel = compressionLevel + 1;
-                log.warn(`非流式请求收到 400，尝试压缩上下文 (级别 ${newCompressionLevel}) 后重试...`);
-                
-                const compressedMessages = this._compressMessages(messages, newCompressionLevel);
-                
-                // 如果压缩后消息数量没有变化，说明无法再压缩，直接报错
-                if (compressedMessages.length >= messages.length && newCompressionLevel > 1) {
-                    log.error('上下文已无法继续压缩，放弃重试');
-                    throw error;
+            // 400 ValidationException 处理
+            if (error.status === 400) {
+                if (KIRO_CONSTANTS.ENABLE_CONTEXT_COMPRESSION && compressionLevel < 3) {
+                    // 开启压缩重试
+                    const newCompressionLevel = compressionLevel + 1;
+                    log.warn(`非流式请求收到 400，尝试压缩上下文 (级别 ${newCompressionLevel}) 后重试...`);
+                    
+                    const compressedMessages = this._compressMessages(messages, newCompressionLevel);
+                    
+                    // 如果压缩后消息数量没有变化，说明无法再压缩，直接报错
+                    if (compressedMessages.length >= messages.length && newCompressionLevel > 1) {
+                        log.error('上下文已无法继续压缩，放弃重试');
+                        throw error;
+                    }
+                    
+                    return this.chat(messages, model, { ...options, _compressionLevel: newCompressionLevel });
+                } else {
+                    // 直接返回错误，提示用户重新打开对话
+                    const contextError = new Error('上下文超出限制，请重新打开对话');
+                    contextError.status = 400;
+                    contextError.isContextLimit = true;
+                    throw contextError;
                 }
-                
-                return this.chat(messages, model, { ...options, _compressionLevel: newCompressionLevel });
             }
             
             throw error;
@@ -1197,20 +1206,29 @@ export class KiroClient {
                 }
             }
 
-            // 400 ValidationException - 尝试压缩上下文后重试
+            // 400 ValidationException 处理
             const compressionLevel = options._compressionLevel || 0;
-            if (status === 400 && this._isValidationException(error) && compressionLevel < 3) {
-                const newCompressionLevel = compressionLevel + 1;
-                log.warn(`流式请求收到 400 ValidationException，尝试压缩上下文 (级别 ${newCompressionLevel}) 后重试...`);
-                
-                const compressedMessages = this._compressMessages(messages, newCompressionLevel);
-                
-                // 如果压缩后消息数量没有变化，说明无法再压缩，直接报错
-                if (compressedMessages.length >= messages.length && newCompressionLevel > 1) {
-                    log.error('上下文已无法继续压缩，放弃重试');
+            if (status === 400 && this._isValidationException(error)) {
+                if (KIRO_CONSTANTS.ENABLE_CONTEXT_COMPRESSION && compressionLevel < 3) {
+                    // 开启压缩重试
+                    const newCompressionLevel = compressionLevel + 1;
+                    log.warn(`流式请求收到 400 ValidationException，尝试压缩上下文 (级别 ${newCompressionLevel}) 后重试...`);
+                    
+                    const compressedMessages = this._compressMessages(messages, newCompressionLevel);
+                    
+                    // 如果压缩后消息数量没有变化，说明无法再压缩，直接报错
+                    if (compressedMessages.length >= messages.length && newCompressionLevel > 1) {
+                        log.error('上下文已无法继续压缩，放弃重试');
+                    } else {
+                        yield* this.chatStream(compressedMessages, model, { ...options, _compressionLevel: newCompressionLevel }, 0);
+                        return;
+                    }
                 } else {
-                    yield* this.chatStream(compressedMessages, model, { ...options, _compressionLevel: newCompressionLevel }, 0);
-                    return;
+                    // 直接返回错误，提示用户重新打开对话
+                    const contextError = new Error('上下文超出限制，请重新打开对话');
+                    contextError.status = 400;
+                    contextError.isContextLimit = true;
+                    throw contextError;
                 }
             }
 

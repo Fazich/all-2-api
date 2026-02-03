@@ -55,7 +55,7 @@ function createAxiosInstance(credential) {
             'x-amzn-kiro-agent-mode': 'spec',
             'x-amz-user-agent': `aws-sdk-js/1.0.0 KiroIDE-${kiroVersion}-${machineId}`,
             'user-agent': `aws-sdk-js/1.0.0 ua/2.1 os/${osName} lang/js md/nodejs#${nodeVersion} api/codewhispererruntime#1.0.0 m/E KiroIDE-${kiroVersion}-${machineId}`,
-            'Connection': 'close'
+            'Connection': 'keep-alive'
         }
     });
 }

@@ -209,8 +209,11 @@ export class KiroAuth {
      * @returns {Promise<{verificationUri: string, userCode: string}>}
      */
     async startBuilderIDAuth() {
+        // 获取替换 region 后的 SSO OIDC 端点
+        const ssoOIDCEndpoint = KIRO_OAUTH_CONFIG.ssoOIDCEndpoint.replace('{{region}}', this.region);
+        
         // 1. 注册 OIDC 客户端
-        const regResponse = await fetch(`${KIRO_OAUTH_CONFIG.ssoOIDCEndpoint}/client/register`, {
+        const regResponse = await fetch(`${ssoOIDCEndpoint}/client/register`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -231,7 +234,7 @@ export class KiroAuth {
         const regData = await regResponse.json();
 
         // 2. 启动设备授权
-        const authResponse = await fetch(`${KIRO_OAUTH_CONFIG.ssoOIDCEndpoint}/device_authorization`, {
+        const authResponse = await fetch(`${ssoOIDCEndpoint}/device_authorization`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -255,7 +258,7 @@ export class KiroAuth {
         console.log(`[Kiro Auth] 或访问 ${deviceAuth.verificationUri} 并输入代码: ${deviceAuth.userCode}`);
 
         // 3. 启动后台轮询
-        this._pollBuilderIDToken(regData.clientId, regData.clientSecret, deviceAuth.deviceCode);
+        this._pollBuilderIDToken(regData.clientId, regData.clientSecret, deviceAuth.deviceCode, ssoOIDCEndpoint);
 
         return {
             verificationUri: deviceAuth.verificationUri,
@@ -394,7 +397,7 @@ export class KiroAuth {
     /**
      * 轮询获取 Builder ID Token
      */
-    async _pollBuilderIDToken(clientId, clientSecret, deviceCode) {
+    async _pollBuilderIDToken(clientId, clientSecret, deviceCode, ssoOIDCEndpoint) {
         const interval = 5;
         const maxAttempts = 60; // 5分钟
         let attempts = 0;
@@ -407,7 +410,7 @@ export class KiroAuth {
             attempts++;
 
             try {
-                const response = await fetch(`${KIRO_OAUTH_CONFIG.ssoOIDCEndpoint}/token`, {
+                const response = await fetch(`${ssoOIDCEndpoint}/token`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',

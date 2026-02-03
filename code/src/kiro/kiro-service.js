@@ -69,7 +69,7 @@ export class KiroService {
                 'x-amzn-kiro-agent-mode': 'spec',
                 'x-amz-user-agent': `aws-sdk-js/1.0.0 KiroIDE-${kiroVersion}-${machineId}`,
                 'user-agent': `aws-sdk-js/1.0.0 ua/2.1 os/${osName} lang/js md/nodejs#${nodeVersion} api/codewhispererruntime#1.0.0 m/E KiroIDE-${kiroVersion}-${machineId}`,
-                'Connection': 'close'
+                'Connection': 'keep-alive'
             },
         };
 
@@ -576,12 +576,21 @@ export class KiroService {
 
                 const status = error.response?.status;
 
-                // 400 ValidationException - 尝试压缩上下文后重试
-                if (status === 400 && this._isValidationException(error) && compressionLevel < 3) {
-                    const newLevel = compressionLevel + 1;
-                    log.warn(`[KiroService] 流式请求收到 400 ValidationException，压缩上下文 (级别 ${newLevel}) 后重试...`);
-                    yield* this.generateContentStream(model, requestBody, newLevel);
-                    return;
+                // 400 ValidationException 处理
+                if (status === 400 && this._isValidationException(error)) {
+                    if (KIRO_CONSTANTS.ENABLE_CONTEXT_COMPRESSION && compressionLevel < 3) {
+                        // 开启压缩重试
+                        const newLevel = compressionLevel + 1;
+                        log.warn(`[KiroService] 流式请求收到 400 ValidationException，压缩上下文 (级别 ${newLevel}) 后重试...`);
+                        yield* this.generateContentStream(model, requestBody, newLevel);
+                        return;
+                    } else {
+                        // 直接返回错误，提示用户重新打开对话
+                        const contextError = new Error('上下文超出限制，请重新打开对话');
+                        contextError.status = 400;
+                        contextError.isContextLimit = true;
+                        throw contextError;
+                    }
                 }
 
                 if ((status === 429 || (status >= 500 && status < 600)) && retryCount < maxRetries) {
@@ -674,11 +683,20 @@ export class KiroService {
             } catch (error) {
                 const status = error.response?.status;
 
-                // 400 ValidationException - 尝试压缩上下文后重试
-                if (status === 400 && this._isValidationException(error) && compressionLevel < 3) {
-                    const newLevel = compressionLevel + 1;
-                    log.warn(`[KiroService] 非流式请求收到 400 ValidationException，压缩上下文 (级别 ${newLevel}) 后重试...`);
-                    return this.generateContent(model, requestBody, newLevel);
+                // 400 ValidationException 处理
+                if (status === 400 && this._isValidationException(error)) {
+                    if (KIRO_CONSTANTS.ENABLE_CONTEXT_COMPRESSION && compressionLevel < 3) {
+                        // 开启压缩重试
+                        const newLevel = compressionLevel + 1;
+                        log.warn(`[KiroService] 非流式请求收到 400 ValidationException，压缩上下文 (级别 ${newLevel}) 后重试...`);
+                        return this.generateContent(model, requestBody, newLevel);
+                    } else {
+                        // 直接返回错误，提示用户重新打开对话
+                        const contextError = new Error('上下文超出限制，请重新打开对话');
+                        contextError.status = 400;
+                        contextError.isContextLimit = true;
+                        throw contextError;
+                    }
                 }
 
                 if ((status === 429 || (status >= 500 && status < 600)) && retryCount < maxRetries) {

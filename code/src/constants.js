@@ -45,6 +45,11 @@ export const KIRO_CONSTANTS = {
     // 请求参数
     CHAT_TRIGGER_TYPE_MANUAL: 'MANUAL',
     ORIGIN_AI_EDITOR: 'AI_EDITOR',
+
+    // 400 错误处理开关
+    // true: 压缩上下文后重试
+    // false: 直接返回错误提示用户重新打开对话
+    ENABLE_CONTEXT_COMPRESSION: false,
 };
 
 /**
