@@ -493,10 +493,84 @@ async function updateSidebarStats() {
     }
 })();
 
+// ============ 移动端菜单初始化 ============
+function initMobileMenu() {
+    // 添加 overlay
+    if (!document.querySelector('.sidebar-overlay')) {
+        const overlay = document.createElement('div');
+        overlay.className = 'sidebar-overlay';
+        overlay.id = 'sidebar-overlay';
+        document.body.appendChild(overlay);
+    }
+
+    // 添加移动端菜单按钮到 header
+    const header = document.querySelector('.header');
+    const headerLeft = document.querySelector('.header-left');
+    if (headerLeft && !document.querySelector('.mobile-menu-btn')) {
+        const menuBtn = document.createElement('button');
+        menuBtn.className = 'mobile-menu-btn';
+        menuBtn.id = 'mobile-menu-btn';
+        menuBtn.innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <line x1="3" y1="12" x2="21" y2="12"/>
+            <line x1="3" y1="6" x2="21" y2="6"/>
+            <line x1="3" y1="18" x2="21" y2="18"/>
+        </svg>`;
+        headerLeft.insertBefore(menuBtn, headerLeft.firstChild);
+    }
+
+    // 绑定事件
+    const menuBtn = document.getElementById('mobile-menu-btn');
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebar-overlay');
+
+    if (menuBtn && sidebar && overlay) {
+        // 打开菜单
+        menuBtn.addEventListener('click', function(e) {
+            e.stopPropagation();
+            sidebar.classList.add('open');
+            overlay.classList.add('active');
+            document.body.style.overflow = 'hidden';
+        });
+
+        // 点击 overlay 关闭菜单
+        overlay.addEventListener('click', function() {
+            closeMobileMenu();
+        });
+
+        // 点击侧边栏导航项后关闭菜单
+        sidebar.querySelectorAll('.nav-item').forEach(item => {
+            item.addEventListener('click', function() {
+                // 延迟关闭以便导航生效
+                setTimeout(closeMobileMenu, 100);
+            });
+        });
+
+        // ESC 键关闭菜单
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' && sidebar.classList.contains('open')) {
+                closeMobileMenu();
+            }
+        });
+    }
+}
+
+function closeMobileMenu() {
+    const sidebar = document.getElementById('sidebar');
+    const overlay = document.getElementById('sidebar-overlay');
+    if (sidebar) sidebar.classList.remove('open');
+    if (overlay) overlay.classList.remove('active');
+    document.body.style.overflow = '';
+}
+
 // 页面完全加载后，从服务器获取最新设置并更新
 document.addEventListener('DOMContentLoaded', function() {
     // 延迟加载站点设置，避免阻塞页面渲染
     setTimeout(() => {
         loadSiteSettings();
     }, 100);
+    
+    // 初始化移动端菜单（等待侧边栏加载）
+    setTimeout(() => {
+        initMobileMenu();
+    }, 200);
 });

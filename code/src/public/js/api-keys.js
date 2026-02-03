@@ -6,6 +6,7 @@ let limitsModal;
 let batchCreateModal;
 let renewModal;
 let batchGeneratedKeys = [];
+let currentSortBy = 'lastUsed'; // 默认排序方式
 
 document.addEventListener('DOMContentLoaded', async () => {
     createKeyModal = document.getElementById('create-key-modal');
@@ -30,6 +31,12 @@ function setupEventListeners() {
     document.getElementById('modal-submit').addEventListener('click', createApiKey);
     createKeyModal.addEventListener('click', function(e) {
         if (e.target === createKeyModal) closeCreateModal();
+    });
+
+    // 排序下拉框事件
+    document.getElementById('sort-select').addEventListener('change', function(e) {
+        currentSortBy = e.target.value;
+        renderApiKeys();
     });
 
     // 限制配置模态框事件
@@ -82,6 +89,41 @@ async function loadApiKeys() {
     }
 }
 
+// 排序函数
+function sortApiKeys(keys, sortBy) {
+    return keys.sort((a, b) => {
+        switch (sortBy) {
+            case 'lastUsed':
+                // 按最后使用时间降序（未使用的排在最后）
+                if (!a.lastUsedAt && !b.lastUsedAt) return 0;
+                if (!a.lastUsedAt) return 1;
+                if (!b.lastUsedAt) return -1;
+                return new Date(b.lastUsedAt) - new Date(a.lastUsedAt);
+            
+            case 'created':
+                // 按创建时间降序（最新的在前）
+                if (!a.createdAt && !b.createdAt) return 0;
+                if (!a.createdAt) return 1;
+                if (!b.createdAt) return -1;
+                return new Date(b.createdAt) - new Date(a.createdAt);
+            
+            case 'expire':
+                // 按过期时间降序（即将过期的在前，永久的在最后）
+                if (!a.expiresAt && !b.expiresAt) return 0;
+                if (!a.expiresAt) return 1;  // 永久有效排在后面
+                if (!b.expiresAt) return -1;
+                return new Date(a.expiresAt) - new Date(b.expiresAt);  // 即将过期的在前
+            
+            case 'name':
+                // 按名称字母顺序
+                return (a.name || '').localeCompare(b.name || '');
+            
+            default:
+                return 0;
+        }
+    });
+}
+
 function renderApiKeys() {
     const list = document.getElementById('api-keys-list');
     const emptyState = document.getElementById('empty-state');
@@ -92,18 +134,18 @@ function renderApiKeys() {
     if (apiKeys.length === 0) {
         list.innerHTML = '';
         emptyState.style.display = 'block';
+        // 移除移动端卡片列表
+        const cardList = document.getElementById('api-keys-card-list');
+        if (cardList) cardList.innerHTML = '';
         return;
     }
 
-    // 按最后使用时间排序，最新的在最上面（未使用的排在最后）
-    const sortedKeys = [...apiKeys].sort((a, b) => {
-        if (!a.lastUsedAt && !b.lastUsedAt) return 0;
-        if (!a.lastUsedAt) return 1;
-        if (!b.lastUsedAt) return -1;
-        return new Date(b.lastUsedAt) - new Date(a.lastUsedAt);
-    });
+    // 根据选择的排序方式排序
+    const sortedKeys = sortApiKeys([...apiKeys], currentSortBy);
 
     emptyState.style.display = 'none';
+    
+    // 渲染表格（桌面端）
     list.innerHTML = sortedKeys.map(function(key) {
         const statusClass = key.isActive ? 'success' : 'error';
         const statusText = key.isActive ? '启用' : '禁用';
@@ -142,6 +184,9 @@ function renderApiKeys() {
             '</tr>';
     }).join('');
 
+    // 渲染卡片列表（移动端）
+    renderApiKeysCards(sortedKeys);
+
     // 绑定复制按钮事件
     document.querySelectorAll('.api-key-copy-btn').forEach(function(btn) {
         btn.addEventListener('click', function() {
@@ -155,6 +200,67 @@ function renderApiKeys() {
     sortedKeys.forEach(function(key) {
         loadKeyLimitsStatus(key.id);
     });
+}
+
+// 移动端卡片渲染
+function renderApiKeysCards(sortedKeys) {
+    // 检查或创建卡片容器
+    let cardList = document.getElementById('api-keys-card-list');
+    if (!cardList) {
+        cardList = document.createElement('div');
+        cardList.id = 'api-keys-card-list';
+        cardList.className = 'api-keys-card-list';
+        const tableWrapper = document.querySelector('.api-keys-table-wrapper');
+        if (tableWrapper) {
+            tableWrapper.parentNode.insertBefore(cardList, tableWrapper.nextSibling);
+        }
+    }
+
+    cardList.innerHTML = sortedKeys.map(function(key) {
+        const statusClass = key.isActive ? 'active' : 'disabled';
+        const statusText = key.isActive ? '启用' : '禁用';
+        const keyDisplay = key.keyValue || key.keyPrefix || '***';
+        const escapedKey = keyDisplay.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
+
+        return '<div class="api-key-card" data-key-id="' + key.id + '" data-key-value="' + escapedKey + '">' +
+            '<div class="api-key-card-header">' +
+            '<span class="api-key-card-name">' + key.name + '</span>' +
+            '<span class="api-key-card-status ' + statusClass + '">' + statusText + '</span>' +
+            '</div>' +
+            '<div class="api-key-card-key">' +
+            '<span class="api-key-card-key-value">' + keyDisplay + '</span>' +
+            '<button class="api-key-card-key-copy" onclick="copyApiKey(\'' + escapedKey + '\')">' +
+            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16">' +
+            '<rect x="9" y="9" width="13" height="13" rx="2" ry="2"/>' +
+            '<path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>' +
+            '</svg></button>' +
+            '</div>' +
+            '<div class="api-key-card-info">' +
+            '<div class="api-key-card-info-item">' +
+            '<span class="api-key-card-info-label">限制/用量</span>' +
+            '<span class="api-key-card-info-value api-key-card-limits" data-key-id="' + key.id + '">-</span>' +
+            '</div>' +
+            '<div class="api-key-card-info-item">' +
+            '<span class="api-key-card-info-label">过期时间</span>' +
+            '<span class="api-key-card-info-value api-key-card-expire" data-key-id="' + key.id + '">-</span>' +
+            '</div>' +
+            '<div class="api-key-card-info-item">' +
+            '<span class="api-key-card-info-label">创建时间</span>' +
+            '<span class="api-key-card-info-value">' + formatDateTime(key.createdAt) + '</span>' +
+            '</div>' +
+            '<div class="api-key-card-info-item">' +
+            '<span class="api-key-card-info-label">最后使用</span>' +
+            '<span class="api-key-card-info-value">' + (key.lastUsedAt ? formatDateTime(key.lastUsedAt) : '从未') + '</span>' +
+            '</div>' +
+            '</div>' +
+            '<div class="api-key-card-actions">' +
+            '<button class="btn btn-secondary btn-sm" onclick="openLimitsModal(' + key.id + ')">限制</button>' +
+            '<button class="btn btn-secondary btn-sm" onclick="openRenewModal(' + key.id + ')">续费</button>' +
+            '<button class="btn btn-secondary btn-sm" onclick="toggleApiKey(' + key.id + ')">' + (key.isActive ? '禁用' : '启用') + '</button>' +
+            '<button class="btn btn-danger btn-sm" onclick="deleteApiKey(' + key.id + ')">删除</button>' +
+            '</div>' +
+            '</div>';
+    }).join('');
 }
 
 async function loadKeyUsage(keyId) {
@@ -271,85 +377,104 @@ async function loadKeyLimitsStatus(keyId) {
         const result = await res.json();
         if (result.success && result.data) {
             const { limits, usage, remaining, expireDate } = result.data;
+            
+            // 桌面端表格
             const cell = document.querySelector('.api-key-limits[data-key-id="' + keyId + '"]');
             const expireCell = document.querySelector('.api-key-expire[data-key-id="' + keyId + '"]');
+            
+            // 移动端卡片
+            const cardLimits = document.querySelector('.api-key-card-limits[data-key-id="' + keyId + '"]');
+            const cardExpire = document.querySelector('.api-key-card-expire[data-key-id="' + keyId + '"]');
 
-            if (cell) {
-                let html = '<div class="limits-mini">';
+            // 构建限制显示内容
+            let limitsHtml = '<div class="limits-mini">';
+            let limitsText = '';
 
-                // 显示今日用量
-                if (limits.dailyLimit > 0) {
-                    const percent = Math.min(100, (usage.daily / limits.dailyLimit) * 100);
-                    html += '<div class="limit-item" title="今日: ' + usage.daily + '/' + limits.dailyLimit + '">' +
-                        '<span class="limit-label">日</span>' +
-                        '<span class="limit-value ' + (percent >= 90 ? 'warning' : '') + '">' + usage.daily + '/' + limits.dailyLimit + '</span>' +
-                        '</div>';
-                }
-
-                // 显示本月用量
-                if (limits.monthlyLimit > 0) {
-                    const percent = Math.min(100, (usage.monthly / limits.monthlyLimit) * 100);
-                    html += '<div class="limit-item" title="本月: ' + usage.monthly + '/' + limits.monthlyLimit + '">' +
-                        '<span class="limit-label">月</span>' +
-                        '<span class="limit-value ' + (percent >= 90 ? 'warning' : '') + '">' + usage.monthly + '/' + limits.monthlyLimit + '</span>' +
-                        '</div>';
-                }
-
-                // 显示并发限制
-                if (limits.concurrentLimit > 0) {
-                    html += '<div class="limit-item" title="并发: ' + usage.currentConcurrent + '/' + limits.concurrentLimit + '">' +
-                        '<span class="limit-label">并发</span>' +
-                        '<span class="limit-value">' + usage.currentConcurrent + '/' + limits.concurrentLimit + '</span>' +
-                        '</div>';
-                }
-
-                // 如果没有任何限制，显示总请求数
-                if (limits.dailyLimit === 0 && limits.monthlyLimit === 0 && limits.concurrentLimit === 0) {
-                    html += '<div class="limit-item">' +
-                        '<span class="limit-value">' + usage.total + ' 请求</span>' +
-                        '</div>';
-                }
-
-                html += '</div>';
-                cell.innerHTML = html;
+            // 显示今日用量
+            if (limits.dailyLimit > 0) {
+                const percent = Math.min(100, (usage.daily / limits.dailyLimit) * 100);
+                limitsHtml += '<div class="limit-item" title="今日: ' + usage.daily + '/' + limits.dailyLimit + '">' +
+                    '<span class="limit-label">日</span>' +
+                    '<span class="limit-value ' + (percent >= 90 ? 'warning' : '') + '">' + usage.daily + '/' + limits.dailyLimit + '</span>' +
+                    '</div>';
+                limitsText += '日:' + usage.daily + '/' + limits.dailyLimit + ' ';
             }
 
-            // 显示过期时间到单独的列
-            if (expireCell) {
-                if (expireDate) {
-                    const daysLeft = remaining.days;
-
-                    let expireClass = '';
-                    // expireDate 已经是后端格式化好的本地时间字符串 "YYYY-MM-DD HH:mm:ss"
-                    // 直接提取显示，不再用 new Date() 解析避免时区问题
-                    let expireDateStr = expireDate;
-                    // 格式化为 MM/DD HH:mm
-                    const parts = expireDate.split(' ');
-                    if (parts.length === 2) {
-                        const dateParts = parts[0].split('-');
-                        const timeParts = parts[1].split(':');
-                        if (dateParts.length === 3 && timeParts.length >= 2) {
-                            expireDateStr = dateParts[1] + '/' + dateParts[2] + ' ' + timeParts[0] + ':' + timeParts[1];
-                        }
-                    }
-
-                    // 判断是否过期：用剩余天数判断
-                    const isExpired = daysLeft <= 0;
-
-                    if (isExpired) {
-                        expireClass = 'danger';
-                    } else if (daysLeft <= 3) {
-                        expireClass = 'danger';
-                    } else if (daysLeft <= 7) {
-                        expireClass = 'warning';
-                    }
-
-                    expireCell.innerHTML = '<span class="limit-value ' + expireClass + '" title="剩余 ' + daysLeft + ' 天">' +
-                        (isExpired ? '已过期' : expireDateStr) + '</span>';
-                } else {
-                    expireCell.innerHTML = '<span class="limit-value" style="color: var(--text-muted);">永久</span>';
-                }
+            // 显示本月用量
+            if (limits.monthlyLimit > 0) {
+                const percent = Math.min(100, (usage.monthly / limits.monthlyLimit) * 100);
+                limitsHtml += '<div class="limit-item" title="本月: ' + usage.monthly + '/' + limits.monthlyLimit + '">' +
+                    '<span class="limit-label">月</span>' +
+                    '<span class="limit-value ' + (percent >= 90 ? 'warning' : '') + '">' + usage.monthly + '/' + limits.monthlyLimit + '</span>' +
+                    '</div>';
+                limitsText += '月:' + usage.monthly + '/' + limits.monthlyLimit + ' ';
             }
+
+            // 显示并发限制
+            if (limits.concurrentLimit > 0) {
+                limitsHtml += '<div class="limit-item" title="并发: ' + usage.currentConcurrent + '/' + limits.concurrentLimit + '">' +
+                    '<span class="limit-label">并发</span>' +
+                    '<span class="limit-value">' + usage.currentConcurrent + '/' + limits.concurrentLimit + '</span>' +
+                    '</div>';
+            }
+
+            // 如果没有任何限制，显示总请求数
+            if (limits.dailyLimit === 0 && limits.monthlyLimit === 0 && limits.concurrentLimit === 0) {
+                limitsHtml += '<div class="limit-item">' +
+                    '<span class="limit-value">' + usage.total + ' 请求</span>' +
+                    '</div>';
+                limitsText = usage.total + ' 请求';
+            }
+
+            limitsHtml += '</div>';
+
+            // 更新桌面端
+            if (cell) cell.innerHTML = limitsHtml;
+            
+            // 更新移动端
+            if (cardLimits) cardLimits.textContent = limitsText || usage.total + ' 请求';
+
+            // 处理过期时间
+            let expireHtml = '';
+            let expireText = '永久';
+            
+            if (expireDate) {
+                const daysLeft = remaining.days;
+                let expireClass = '';
+                let expireDateStr = expireDate;
+                
+                // 格式化为 MM/DD HH:mm
+                const parts = expireDate.split(' ');
+                if (parts.length === 2) {
+                    const dateParts = parts[0].split('-');
+                    const timeParts = parts[1].split(':');
+                    if (dateParts.length === 3 && timeParts.length >= 2) {
+                        expireDateStr = dateParts[1] + '/' + dateParts[2] + ' ' + timeParts[0] + ':' + timeParts[1];
+                    }
+                }
+
+                const isExpired = daysLeft <= 0;
+
+                if (isExpired) {
+                    expireClass = 'danger';
+                } else if (daysLeft <= 3) {
+                    expireClass = 'danger';
+                } else if (daysLeft <= 7) {
+                    expireClass = 'warning';
+                }
+
+                expireHtml = '<span class="limit-value ' + expireClass + '" title="剩余 ' + daysLeft + ' 天">' +
+                    (isExpired ? '已过期' : expireDateStr) + '</span>';
+                expireText = isExpired ? '已过期' : (daysLeft + '天');
+            } else {
+                expireHtml = '<span class="limit-value" style="color: var(--text-muted);">永久</span>';
+            }
+
+            // 更新桌面端过期时间
+            if (expireCell) expireCell.innerHTML = expireHtml;
+            
+            // 更新移动端过期时间
+            if (cardExpire) cardExpire.textContent = expireText;
         }
     } catch (err) {
         console.error('Load key limits status error:', err);

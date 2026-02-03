@@ -1559,20 +1559,323 @@ margin-bottom: 16px;
     margin: 8px 0;
 }
 
-/* Responsive */
-@media (max-width: 1024px) {
-    .sidebar { transform: translateX(-100%); }
-    .sidebar.open { transform: translateX(0); }
-    .main-content { margin-left: 0; }
-    .cards-grid { grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); }
+/* ============ Mobile Menu Toggle ============ */
+.mobile-menu-btn {
+    display: none;
+    width: 40px;
+    height: 40px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    color: var(--text-secondary);
+    cursor: pointer;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--transition-fast);
+    flex-shrink: 0;
 }
 
+.mobile-menu-btn:hover {
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+}
+
+.mobile-menu-btn svg {
+    width: 20px;
+    height: 20px;
+}
+
+/* Mobile Overlay */
+.sidebar-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    z-index: 99;
+    opacity: 0;
+    transition: opacity var(--transition-normal);
+    pointer-events: none;
+}
+
+.sidebar-overlay.active {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+/* ============ Responsive Breakpoints ============ */
+
+/* Large screens (1400px and below) */
+@media (max-width: 1400px) {
+    :root {
+        --sidebar-width: 240px;
+    }
+}
+
+/* Medium screens - Tablet landscape (1024px and below) */
+@media (max-width: 1024px) {
+    .sidebar {
+        transform: translateX(-100%);
+        width: 280px;
+    }
+    .sidebar.open {
+        transform: translateX(0);
+    }
+    .sidebar-overlay {
+        display: block;
+    }
+    .main-content {
+        margin-left: 0;
+    }
+    .mobile-menu-btn {
+        display: flex;
+    }
+    .cards-grid {
+        grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    }
+    .search-box {
+        width: 240px;
+    }
+}
+
+/* Tablet portrait (768px and below) */
 @media (max-width: 768px) {
-    .header { padding: 0 16px; }
-    .header-center { display: none; }
-    .content-area { padding: 16px; }
-    .cards-grid { grid-template-columns: 1fr; }
-    .form-row { grid-template-columns: 1fr; }
+    .header {
+        padding: 0 16px;
+        height: 56px;
+    }
+    .header-center {
+        display: none;
+    }
+    .header-right {
+        gap: 8px;
+    }
+    .page-title-section {
+        gap: 12px;
+    }
+    .page-icon {
+        width: 36px;
+        height: 36px;
+    }
+    .page-icon svg {
+        width: 18px;
+        height: 18px;
+    }
+    .page-title {
+        font-size: 18px;
+    }
+    .page-subtitle {
+        display: none;
+    }
+    .content-area {
+        padding: 16px;
+    }
+    .cards-grid {
+        grid-template-columns: 1fr;
+        gap: 16px;
+    }
+    .form-row {
+        grid-template-columns: 1fr;
+    }
+    .modal {
+        width: 95%;
+        max-width: none;
+        margin: 16px;
+        max-height: calc(100vh - 32px);
+    }
+    .modal-header {
+        padding: 16px;
+    }
+    .modal-body {
+        padding: 16px;
+    }
+    .modal-footer {
+        padding: 12px 16px;
+        flex-wrap: wrap;
+    }
+    .btn {
+        padding: 10px 16px;
+    }
+    .btn-sm {
+        padding: 8px 12px;
+    }
+    .toast-container {
+        top: 12px;
+        right: 12px;
+        left: 12px;
+    }
+    .toast {
+        min-width: auto;
+        max-width: none;
+    }
+    .content-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 12px;
+    }
+    .content-header-right {
+        width: 100%;
+        justify-content: flex-start;
+        flex-wrap: wrap;
+    }
+    .account-card {
+        padding: 16px;
+    }
+    .card-footer {
+        flex-direction: column;
+        gap: 12px;
+        align-items: flex-start;
+    }
+    .card-actions {
+        width: 100%;
+        justify-content: flex-end;
+    }
+    .card-dates {
+        flex-wrap: wrap;
+        gap: 8px;
+    }
+    /* Table responsive */
+    .api-keys-table-wrapper,
+    .logs-table-wrapper {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    .api-keys-table,
+    .logs-table {
+        min-width: 600px;
+    }
+    .logs-stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    .logs-filters {
+        flex-direction: column;
+        gap: 12px;
+    }
+    .logs-filter-group {
+        width: 100%;
+    }
+    .logs-filter-input {
+        width: 100%;
+    }
+    .logs-filter-actions {
+        width: 100%;
+        margin-left: 0;
+    }
+    .logs-pagination {
+        flex-direction: column;
+        gap: 12px;
+        align-items: center;
+    }
+}
+
+/* Small screens - Mobile (480px and below) */
+@media (max-width: 480px) {
+    .header {
+        padding: 0 12px;
+    }
+    .content-area {
+        padding: 12px;
+    }
+    .page-title {
+        font-size: 16px;
+    }
+    .account-card {
+        padding: 14px;
+    }
+    .card-header {
+        gap: 10px;
+    }
+    .card-avatar {
+        width: 40px;
+        height: 40px;
+        font-size: 16px;
+    }
+    .card-email {
+        font-size: 14px;
+    }
+    .card-usage {
+        padding: 12px;
+    }
+    .card-tags {
+        gap: 6px;
+    }
+    .tag {
+        padding: 4px 10px;
+        font-size: 11px;
+    }
+    .btn {
+        padding: 8px 14px;
+        font-size: 13px;
+    }
+    .btn-lg {
+        padding: 10px 20px;
+        font-size: 14px;
+    }
+    .modal-header {
+        padding: 14px;
+    }
+    .modal-title {
+        font-size: 16px;
+    }
+    .modal-body {
+        padding: 14px;
+    }
+    .form-group {
+        margin-bottom: 16px;
+    }
+    .form-input,
+    .form-select,
+    .form-textarea {
+        padding: 10px 12px;
+        font-size: 14px;
+    }
+    .logs-stats-grid {
+        grid-template-columns: 1fr;
+    }
+    .logs-stat-card {
+        padding: 14px;
+    }
+    .logs-stat-icon {
+        width: 40px;
+        height: 40px;
+    }
+    .logs-stat-value {
+        font-size: 20px;
+    }
+    .empty-state {
+        padding: 60px 16px;
+    }
+    .empty-icon {
+        width: 60px;
+        height: 60px;
+    }
+    .empty-title {
+        font-size: 18px;
+    }
+}
+
+/* Touch device optimizations */
+@media (hover: none) and (pointer: coarse) {
+    .btn {
+        min-height: 44px;
+    }
+    .nav-item {
+        min-height: 48px;
+    }
+    .card-action-btn {
+        width: 40px;
+        height: 40px;
+    }
+    .modal-close {
+        width: 40px;
+        height: 40px;
+    }
+    .copy-btn {
+        opacity: 1;
+    }
 }
 
 /* Chat Page Styles */

@@ -35,6 +35,14 @@
                 <div class="content-header">
                     <div class="content-header-left">
                         <span class="account-count" id="api-keys-count">共 0 个密钥</span>
+                        <div class="sort-select-wrapper">
+                            <select class="form-select sort-select" id="sort-select">
+                                <option value="lastUsed">最后使用</option>
+                                <option value="created">创建时间</option>
+                                <option value="expire">过期时间</option>
+                                <option value="name">名称</option>
+                            </select>
+                        </div>
                     </div>
                     <div class="content-header-right">
                         <button class="btn btn-secondary" id="batch-create-btn">
