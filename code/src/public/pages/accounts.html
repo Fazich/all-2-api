@@ -74,6 +74,14 @@
                         </svg>
                         批量导入
                     </button>
+                    <button class="btn btn-secondary" id="import-idc-btn">
+                        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+                            <line x1="12" y1="8" x2="12" y2="16"/>
+                            <line x1="8" y1="12" x2="16" y2="12"/>
+                        </svg>
+                        导入 IdC
+                    </button>
                 </div>
             </header>
 
@@ -332,6 +340,143 @@ user2@example.com aorAAAAA...
                         <line x1="12" y1="3" x2="12" y2="15"/>
                     </svg>
                     导入
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Import IdC Modal -->
+    <div class="modal-overlay" id="import-idc-modal">
+        <div class="modal" style="max-width: 750px;">
+            <div class="modal-header">
+                <h2 class="modal-title">导入 IdC/Builder ID 凭证</h2>
+                <button class="modal-close" id="idc-modal-close">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <!-- 导入模式切换 -->
+                <div class="form-group">
+                    <label class="form-label">导入模式</label>
+                    <div class="import-mode-tabs">
+                        <button class="import-mode-tab active" data-mode="dual-file">双文件模式</button>
+                        <button class="import-mode-tab" data-mode="json-array">JSON 数组模式</button>
+                    </div>
+                </div>
+
+                <!-- 双文件模式 -->
+                <div id="dual-file-mode">
+                    <p class="form-hint" style="margin-bottom: 16px;">
+                        上传 Kiro IDE 导出的两个 JSON 文件（Client 文件 + Token 文件）
+                    </p>
+                    <div class="form-group">
+                        <label class="form-label">凭证名称</label>
+                        <input type="text" class="form-input" id="idc-name" placeholder="可选，留空使用邮箱">
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group" style="flex: 1;">
+                            <label class="form-label">Client 文件 <span class="required">*</span></label>
+                            <div class="file-upload-area" id="client-file-area">
+                                <input type="file" id="client-file-input" accept=".json" style="display: none;">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 32px; height: 32px; margin-bottom: 8px; opacity: 0.5;">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                    <polyline points="14 2 14 8 20 8"/>
+                                    <line x1="12" y1="18" x2="12" y2="12"/>
+                                    <line x1="9" y1="15" x2="15" y2="15"/>
+                                </svg>
+                                <span class="file-upload-text">点击或拖拽上传</span>
+                                <span class="file-upload-hint">包含 clientId, clientSecret</span>
+                            </div>
+                            <div class="file-selected" id="client-file-selected" style="display: none;">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px;">
+                                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                                    <polyline points="22 4 12 14.01 9 11.01"/>
+                                </svg>
+                                <span id="client-file-name"></span>
+                                <button class="file-remove-btn" id="client-file-remove">&times;</button>
+                            </div>
+                        </div>
+                        <div class="form-group" style="flex: 1;">
+                            <label class="form-label">Token 文件 <span class="required">*</span></label>
+                            <div class="file-upload-area" id="token-file-area">
+                                <input type="file" id="token-file-input" accept=".json" style="display: none;">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 32px; height: 32px; margin-bottom: 8px; opacity: 0.5;">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                                    <polyline points="14 2 14 8 20 8"/>
+                                    <line x1="12" y1="18" x2="12" y2="12"/>
+                                    <line x1="9" y1="15" x2="15" y2="15"/>
+                                </svg>
+                                <span class="file-upload-text">点击或拖拽上传</span>
+                                <span class="file-upload-hint">包含 accessToken, refreshToken</span>
+                            </div>
+                            <div class="file-selected" id="token-file-selected" style="display: none;">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width: 16px; height: 16px;">
+                                    <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+                                    <polyline points="22 4 12 14.01 9 11.01"/>
+                                </svg>
+                                <span id="token-file-name"></span>
+                                <button class="file-remove-btn" id="token-file-remove">&times;</button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">或直接粘贴 JSON 内容</label>
+                        <div class="form-row">
+                            <div class="form-group" style="flex: 1;">
+                                <textarea class="form-textarea" id="idc-client-json" style="min-height: 100px; font-family: monospace; font-size: 11px;" placeholder='Client 文件内容:
+{
+  "clientId": "...",
+  "clientSecret": "..."
+}'></textarea>
+                            </div>
+                            <div class="form-group" style="flex: 1;">
+                                <textarea class="form-textarea" id="idc-token-json" style="min-height: 100px; font-family: monospace; font-size: 11px;" placeholder='Token 文件内容:
+{
+  "accessToken": "...",
+  "refreshToken": "..."
+}'></textarea>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- JSON 数组模式 -->
+                <div id="json-array-mode" style="display: none;">
+                    <p class="form-hint" style="margin-bottom: 16px;">
+                        粘贴完整的 JSON 数组，支持批量导入多个 IdC 凭证
+                    </p>
+                    <div class="form-group">
+                        <label class="form-label">JSON 数组 <span class="required">*</span></label>
+                        <textarea class="form-textarea" id="idc-json-array" style="min-height: 280px; font-family: monospace; font-size: 11px;" placeholder='[
+  {
+    "email": "user@example.com",
+    "accessToken": "aoaAAAAA...",
+    "refreshToken": "aorAAAAA...",
+    "clientId": "xxx",
+    "clientSecret": "eyJ...",
+    "authMethod": "IdC",
+    "provider": "Enterprise",
+    "region": "us-east-1",
+    "expiresAt": "2026/02/07 02:10:20"
+  },
+  ...
+]'></textarea>
+                        <p class="form-hint">每个对象需包含: email, accessToken, refreshToken, clientId, clientSecret</p>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" id="idc-modal-cancel">取消</button>
+                <button class="btn btn-primary" id="idc-modal-submit">
+                    <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                        <polyline points="17 8 12 3 7 8"/>
+                        <line x1="12" y1="3" x2="12" y2="15"/>
+                    </svg>
+                    导入凭证
                 </button>
             </div>
         </div>

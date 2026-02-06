@@ -3,7 +3,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import axios from 'axios';
 import crypto from 'crypto';
-import { CredentialStore, UserStore, ApiKeyStore, ApiLogStore, GeminiCredentialStore, OrchidsCredentialStore, WarpCredentialStore, TrialApplicationStore, SiteSettingsStore, VertexCredentialStore, BedrockCredentialStore, ModelPricingStore, initDatabase } from './db.js';
+import { CredentialStore, UserStore, ApiKeyStore, ApiLogStore, GeminiCredentialStore, OrchidsCredentialStore, WarpCredentialStore, TrialApplicationStore, SiteSettingsStore, VertexCredentialStore, BedrockCredentialStore, ModelPricingStore, AmiCredentialStore, initDatabase } from './db.js';
 import { KiroClient } from './kiro/client.js';
 import { KiroService } from './kiro/kiro-service.js';
 import { KiroAPI } from './kiro/api.js';
@@ -32,6 +32,7 @@ import {
 import { setupGeminiRoutes } from './gemini/gemini-routes.js';
 import { setupVertexRoutes } from './vertex/vertex-routes.js';
 import bedrockRoutes from './bedrock/bedrock-routes.js';
+import { setupAmiRoutes } from './ami/ami-routes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -3107,6 +3108,265 @@ app.post('/api/credentials/batch-import', async (req, res) => {
     }
 });
 
+// 导入 IdC/Builder ID 凭证（双文件格式）
+// 文件1: { clientId, clientSecret, expiresAt }
+// 文件2: { accessToken, refreshToken, expiresAt, clientIdHash, authMethod, provider, region }
+app.post('/api/credentials/import-idc', async (req, res) => {
+    try {
+        const { clientFile, tokenFile, name } = req.body;
+
+        // 验证必需字段
+        if (!clientFile || !tokenFile) {
+            return res.status(400).json({
+                success: false,
+                error: '需要提供 clientFile 和 tokenFile 两个文件内容'
+            });
+        }
+
+        // 解析文件内容（支持字符串或对象）
+        let clientData, tokenData;
+        try {
+            clientData = typeof clientFile === 'string' ? JSON.parse(clientFile) : clientFile;
+            tokenData = typeof tokenFile === 'string' ? JSON.parse(tokenFile) : tokenFile;
+        } catch (parseError) {
+            return res.status(400).json({
+                success: false,
+                error: `JSON 解析失败: ${parseError.message}`
+            });
+        }
+
+        // 验证 clientFile 必需字段
+        if (!clientData.clientId || !clientData.clientSecret) {
+            return res.status(400).json({
+                success: false,
+                error: 'clientFile 缺少 clientId 或 clientSecret'
+            });
+        }
+
+        // 验证 tokenFile 必需字段
+        if (!tokenData.accessToken || !tokenData.refreshToken) {
+            return res.status(400).json({
+                success: false,
+                error: 'tokenFile 缺少 accessToken 或 refreshToken'
+            });
+        }
+
+        // 确定认证方式
+        const authMethod = tokenData.authMethod || 'IdC';
+        const provider = tokenData.provider || 'Enterprise';
+        const region = tokenData.region || 'us-east-1';
+
+        // 生成凭证名称
+        const credentialName = name || `IdC-${Date.now()}`;
+
+        // 检查是否已存在同名凭证
+        const existing = await store.getByName(credentialName);
+        if (existing) {
+            // 更新现有凭证
+            await store.update(existing.id, {
+                accessToken: tokenData.accessToken,
+                refreshToken: tokenData.refreshToken,
+                clientId: clientData.clientId,
+                clientSecret: clientData.clientSecret,
+                authMethod: authMethod,
+                provider: provider,
+                region: region,
+                expiresAt: tokenData.expiresAt || clientData.expiresAt
+            });
+
+            console.log(`[${getTimestamp()}] IdC 凭证已更新: id=${existing.id}, name=${credentialName}`);
+            res.json({
+                success: true,
+                data: {
+                    id: existing.id,
+                    name: credentialName,
+                    action: 'updated',
+                    authMethod,
+                    provider,
+                    region
+                }
+            });
+        } else {
+            // 创建新凭证
+            const id = await store.add({
+                name: credentialName,
+                accessToken: tokenData.accessToken,
+                refreshToken: tokenData.refreshToken,
+                clientId: clientData.clientId,
+                clientSecret: clientData.clientSecret,
+                authMethod: authMethod,
+                provider: provider,
+                region: region,
+                expiresAt: tokenData.expiresAt || clientData.expiresAt
+            });
+
+            console.log(`[${getTimestamp()}] IdC 凭证已创建: id=${id}, name=${credentialName}, authMethod=${authMethod}`);
+            res.json({
+                success: true,
+                data: {
+                    id,
+                    name: credentialName,
+                    action: 'created',
+                    authMethod,
+                    provider,
+                    region
+                }
+            });
+        }
+    } catch (error) {
+        console.error(`[${getTimestamp()}] IdC 凭证导入失败:`, error.message);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// 批量导入 IdC/Builder ID 凭证（JSON 数组格式）
+// 支持完整的凭证对象数组，每个对象包含 email, accessToken, refreshToken, clientId, clientSecret 等
+app.post('/api/credentials/batch-import-idc', async (req, res) => {
+    try {
+        const { accounts } = req.body;
+
+        // 验证输入
+        if (!accounts) {
+            return res.status(400).json({
+                success: false,
+                error: '需要提供 accounts 数组'
+            });
+        }
+
+        // 解析数据（支持字符串或数组）
+        let accountList;
+        try {
+            accountList = typeof accounts === 'string' ? JSON.parse(accounts) : accounts;
+        } catch (parseError) {
+            return res.status(400).json({
+                success: false,
+                error: `JSON 解析失败: ${parseError.message}`
+            });
+        }
+
+        if (!Array.isArray(accountList)) {
+            return res.status(400).json({
+                success: false,
+                error: 'accounts 必须是数组'
+            });
+        }
+
+        if (accountList.length === 0) {
+            return res.status(400).json({
+                success: false,
+                error: 'accounts 数组不能为空'
+            });
+        }
+
+        const results = {
+            success: 0,
+            failed: 0,
+            updated: 0,
+            details: []
+        };
+
+        for (const account of accountList) {
+            try {
+                // 验证必需字段
+                if (!account.accessToken || !account.refreshToken) {
+                    results.failed++;
+                    results.details.push({
+                        email: account.email || 'unknown',
+                        success: false,
+                        error: '缺少 accessToken 或 refreshToken'
+                    });
+                    continue;
+                }
+
+                if (!account.clientId || !account.clientSecret) {
+                    results.failed++;
+                    results.details.push({
+                        email: account.email || 'unknown',
+                        success: false,
+                        error: '缺少 clientId 或 clientSecret'
+                    });
+                    continue;
+                }
+
+                // 提取字段
+                const email = account.email || account.userId || `IdC-${Date.now()}`;
+                const authMethod = account.authMethod || 'IdC';
+                const provider = account.provider || 'Enterprise';
+                const region = account.region || 'us-east-1';
+
+                // 处理过期时间格式（支持 "2026/02/07 02:10:20" 格式）
+                let expiresAt = account.expiresAt;
+                if (expiresAt && typeof expiresAt === 'string' && expiresAt.includes('/')) {
+                    // 转换 "2026/02/07 02:10:20" 为 ISO 格式
+                    expiresAt = new Date(expiresAt.replace(/\//g, '-')).toISOString();
+                }
+
+                // 检查是否已存在（按 email 或 clientId 查找）
+                const existing = await store.getByName(email);
+
+                if (existing) {
+                    // 更新现有凭证
+                    await store.update(existing.id, {
+                        accessToken: account.accessToken,
+                        refreshToken: account.refreshToken,
+                        clientId: account.clientId,
+                        clientSecret: account.clientSecret,
+                        authMethod: authMethod,
+                        provider: provider,
+                        region: region,
+                        expiresAt: expiresAt
+                    });
+
+                    results.updated++;
+                    results.details.push({
+                        id: existing.id,
+                        email: email,
+                        success: true,
+                        action: 'updated'
+                    });
+                } else {
+                    // 创建新凭证
+                    const id = await store.add({
+                        name: email,
+                        accessToken: account.accessToken,
+                        refreshToken: account.refreshToken,
+                        clientId: account.clientId,
+                        clientSecret: account.clientSecret,
+                        authMethod: authMethod,
+                        provider: provider,
+                        region: region,
+                        expiresAt: expiresAt
+                    });
+
+                    results.success++;
+                    results.details.push({
+                        id: id,
+                        email: email,
+                        success: true,
+                        action: 'created'
+                    });
+                }
+            } catch (err) {
+                results.failed++;
+                results.details.push({
+                    email: account.email || 'unknown',
+                    success: false,
+                    error: err.message
+                });
+            }
+        }
+
+        console.log(`[${getTimestamp()}] 批量导入 IdC 完成: 新增 ${results.success}, 更新 ${results.updated}, 失败 ${results.failed}`);
+        res.json({
+            success: true,
+            data: results
+        });
+    } catch (error) {
+        console.error(`[${getTimestamp()}] 批量导入 IdC 失败:`, error.message);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 // ==================== OAuth 登录 API ====================
 
 // 存储活跃的 OAuth 认证实例
@@ -4689,6 +4949,7 @@ async function start() {
     trialStore = await TrialApplicationStore.create();
     siteSettingsStore = await SiteSettingsStore.create();
     pricingStore = await ModelPricingStore.create();
+    const amiStore = await AmiCredentialStore.create();
 
     // 加载动态定价配置
     try {
@@ -4755,6 +5016,10 @@ async function start() {
     // 设置 Bedrock 路由
     app.use('/api/bedrock', bedrockRoutes);
     console.log(`[${getTimestamp()}] Bedrock 服务已启动`);
+
+    // 设置 AMI 路由
+    setupAmiRoutes(app, amiStore, verifyApiKey);
+    console.log(`[${getTimestamp()}] AMI 服务已启动`);
 
     // 启动定时刷新任务
     startCredentialsRefreshTask();

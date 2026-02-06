@@ -126,6 +126,9 @@ function setupEventListeners() {
     contextMenu.querySelectorAll('.context-menu-item').forEach(item => {
         item.addEventListener('click', () => handleContextAction(item.dataset.action));
     });
+
+    // 初始化 IdC 导入功能
+    initIdcImport();
 }
 
 // API 函数
@@ -808,4 +811,318 @@ function showContextMenu(e, id) {
 function hideContextMenu() {
     contextMenu.classList.remove('active');
     contextMenuTarget = null;
+}
+
+// ============ IdC 导入功能 ============
+let importIdcModal;
+let clientFileData = null;
+let tokenFileData = null;
+let currentImportMode = 'dual-file'; // 'dual-file' or 'json-array'
+
+function initIdcImport() {
+    importIdcModal = document.getElementById('import-idc-modal');
+    if (!importIdcModal) return;
+
+    // 打开模态框
+    document.getElementById('import-idc-btn')?.addEventListener('click', openIdcImportModal);
+
+    // 关闭模态框
+    document.getElementById('idc-modal-close')?.addEventListener('click', closeIdcImportModal);
+    document.getElementById('idc-modal-cancel')?.addEventListener('click', closeIdcImportModal);
+    importIdcModal.addEventListener('click', (e) => {
+        if (e.target === importIdcModal) closeIdcImportModal();
+    });
+
+    // 模式切换
+    document.querySelectorAll('.import-mode-tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            document.querySelectorAll('.import-mode-tab').forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+            currentImportMode = tab.dataset.mode;
+
+            // 切换显示
+            document.getElementById('dual-file-mode').style.display = currentImportMode === 'dual-file' ? 'block' : 'none';
+            document.getElementById('json-array-mode').style.display = currentImportMode === 'json-array' ? 'block' : 'none';
+        });
+    });
+
+    // 提交
+    document.getElementById('idc-modal-submit')?.addEventListener('click', handleIdcImport);
+
+    // 文件上传区域 - Client 文件
+    const clientFileArea = document.getElementById('client-file-area');
+    const clientFileInput = document.getElementById('client-file-input');
+    if (clientFileArea && clientFileInput) {
+        clientFileArea.addEventListener('click', () => clientFileInput.click());
+        clientFileArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            clientFileArea.classList.add('dragover');
+        });
+        clientFileArea.addEventListener('dragleave', () => {
+            clientFileArea.classList.remove('dragover');
+        });
+        clientFileArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            clientFileArea.classList.remove('dragover');
+            const file = e.dataTransfer.files[0];
+            if (file) handleClientFile(file);
+        });
+        clientFileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) handleClientFile(file);
+        });
+    }
+
+    // 文件上传区域 - Token 文件
+    const tokenFileArea = document.getElementById('token-file-area');
+    const tokenFileInput = document.getElementById('token-file-input');
+    if (tokenFileArea && tokenFileInput) {
+        tokenFileArea.addEventListener('click', () => tokenFileInput.click());
+        tokenFileArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            tokenFileArea.classList.add('dragover');
+        });
+        tokenFileArea.addEventListener('dragleave', () => {
+            tokenFileArea.classList.remove('dragover');
+        });
+        tokenFileArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            tokenFileArea.classList.remove('dragover');
+            const file = e.dataTransfer.files[0];
+            if (file) handleTokenFile(file);
+        });
+        tokenFileInput.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (file) handleTokenFile(file);
+        });
+    }
+
+    // 移除文件按钮
+    document.getElementById('client-file-remove')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        clearClientFile();
+    });
+    document.getElementById('token-file-remove')?.addEventListener('click', (e) => {
+        e.stopPropagation();
+        clearTokenFile();
+    });
+}
+
+function openIdcImportModal() {
+    if (!importIdcModal) return;
+    importIdcModal.classList.add('active');
+    // 重置表单
+    document.getElementById('idc-name').value = '';
+    document.getElementById('idc-client-json').value = '';
+    document.getElementById('idc-token-json').value = '';
+    document.getElementById('idc-json-array').value = '';
+    clearClientFile();
+    clearTokenFile();
+    // 重置为双文件模式
+    currentImportMode = 'dual-file';
+    document.querySelectorAll('.import-mode-tab').forEach(t => t.classList.remove('active'));
+    document.querySelector('.import-mode-tab[data-mode="dual-file"]')?.classList.add('active');
+    document.getElementById('dual-file-mode').style.display = 'block';
+    document.getElementById('json-array-mode').style.display = 'none';
+}
+
+function closeIdcImportModal() {
+    if (!importIdcModal) return;
+    importIdcModal.classList.remove('active');
+}
+
+function handleClientFile(file) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        try {
+            clientFileData = JSON.parse(e.target.result);
+            document.getElementById('client-file-area').style.display = 'none';
+            document.getElementById('client-file-selected').style.display = 'flex';
+            document.getElementById('client-file-name').textContent = file.name;
+            document.getElementById('idc-client-json').value = JSON.stringify(clientFileData, null, 2);
+        } catch (err) {
+            showToast('Client 文件解析失败: ' + err.message, 'error');
+        }
+    };
+    reader.readAsText(file);
+}
+
+function handleTokenFile(file) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        try {
+            tokenFileData = JSON.parse(e.target.result);
+            document.getElementById('token-file-area').style.display = 'none';
+            document.getElementById('token-file-selected').style.display = 'flex';
+            document.getElementById('token-file-name').textContent = file.name;
+            document.getElementById('idc-token-json').value = JSON.stringify(tokenFileData, null, 2);
+        } catch (err) {
+            showToast('Token 文件解析失败: ' + err.message, 'error');
+        }
+    };
+    reader.readAsText(file);
+}
+
+function clearClientFile() {
+    clientFileData = null;
+    const area = document.getElementById('client-file-area');
+    const selected = document.getElementById('client-file-selected');
+    if (area) area.style.display = 'flex';
+    if (selected) selected.style.display = 'none';
+    const input = document.getElementById('client-file-input');
+    if (input) input.value = '';
+}
+
+function clearTokenFile() {
+    tokenFileData = null;
+    const area = document.getElementById('token-file-area');
+    const selected = document.getElementById('token-file-selected');
+    if (area) area.style.display = 'flex';
+    if (selected) selected.style.display = 'none';
+    const input = document.getElementById('token-file-input');
+    if (input) input.value = '';
+}
+
+async function handleIdcImport() {
+    // 根据当前模式处理
+    if (currentImportMode === 'json-array') {
+        await handleJsonArrayImport();
+    } else {
+        await handleDualFileImport();
+    }
+}
+
+// 双文件模式导入
+async function handleDualFileImport() {
+    const name = document.getElementById('idc-name').value.trim();
+    const clientJsonText = document.getElementById('idc-client-json').value.trim();
+    const tokenJsonText = document.getElementById('idc-token-json').value.trim();
+
+    // 优先使用文件数据，否则使用文本框内容
+    let clientData = clientFileData;
+    let tokenData = tokenFileData;
+
+    if (!clientData && clientJsonText) {
+        try {
+            clientData = JSON.parse(clientJsonText);
+        } catch (err) {
+            showToast('Client JSON 解析失败: ' + err.message, 'error');
+            return;
+        }
+    }
+
+    if (!tokenData && tokenJsonText) {
+        try {
+            tokenData = JSON.parse(tokenJsonText);
+        } catch (err) {
+            showToast('Token JSON 解析失败: ' + err.message, 'error');
+            return;
+        }
+    }
+
+    if (!clientData) {
+        showToast('请上传或粘贴 Client 文件内容', 'error');
+        return;
+    }
+
+    if (!tokenData) {
+        showToast('请上传或粘贴 Token 文件内容', 'error');
+        return;
+    }
+
+    // 验证必需字段
+    if (!clientData.clientId || !clientData.clientSecret) {
+        showToast('Client 文件缺少 clientId 或 clientSecret', 'error');
+        return;
+    }
+
+    if (!tokenData.accessToken || !tokenData.refreshToken) {
+        showToast('Token 文件缺少 accessToken 或 refreshToken', 'error');
+        return;
+    }
+
+    showToast('正在导入 IdC 凭证...', 'warning');
+
+    try {
+        const res = await fetch('/api/credentials/import-idc', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + authToken
+            },
+            body: JSON.stringify({
+                name: name || undefined,
+                clientFile: clientData,
+                tokenFile: tokenData
+            })
+        });
+
+        const result = await res.json();
+        if (result.success) {
+            const action = result.data.action === 'updated' ? '更新' : '创建';
+            showToast(`IdC 凭证${action}成功: ${result.data.name}`, 'success');
+            closeIdcImportModal();
+            loadCredentials();
+            updateSidebarStats();
+        } else {
+            showToast(result.error || '导入失败', 'error');
+        }
+    } catch (err) {
+        showToast('网络错误: ' + err.message, 'error');
+    }
+}
+
+// JSON 数组模式导入
+async function handleJsonArrayImport() {
+    const jsonArrayText = document.getElementById('idc-json-array').value.trim();
+
+    if (!jsonArrayText) {
+        showToast('请粘贴 JSON 数组内容', 'error');
+        return;
+    }
+
+    let accounts;
+    try {
+        accounts = JSON.parse(jsonArrayText);
+    } catch (err) {
+        showToast('JSON 解析失败: ' + err.message, 'error');
+        return;
+    }
+
+    if (!Array.isArray(accounts)) {
+        showToast('数据必须是 JSON 数组格式', 'error');
+        return;
+    }
+
+    if (accounts.length === 0) {
+        showToast('数组不能为空', 'error');
+        return;
+    }
+
+    showToast(`正在导入 ${accounts.length} 个 IdC 凭证...`, 'warning');
+
+    try {
+        const res = await fetch('/api/credentials/batch-import-idc', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + authToken
+            },
+            body: JSON.stringify({ accounts })
+        });
+
+        const result = await res.json();
+        if (result.success) {
+            const data = result.data;
+            showToast(`导入完成: 新增 ${data.success}, 更新 ${data.updated}, 失败 ${data.failed}`,
+                data.failed > 0 ? 'warning' : 'success');
+            closeIdcImportModal();
+            loadCredentials();
+            updateSidebarStats();
+        } else {
+            showToast(result.error || '导入失败', 'error');
+        }
+    } catch (err) {
+        showToast('网络错误: ' + err.message, 'error');
+    }
 }

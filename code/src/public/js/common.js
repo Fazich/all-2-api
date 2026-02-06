@@ -227,6 +227,7 @@ function navigateTo(page) {
         'accounts': '/pages/accounts.html',
         'gemini': '/pages/gemini.html',
         'orchids': '/pages/orchids.html',
+        'ami': '/pages/ami.html',
         'warp': '/pages/warp.html',
         'vertex': '/pages/vertex.html',
         'chat': '/pages/chat.html',
@@ -292,6 +293,15 @@ function getSidebarHTML(stats = { total: 0, active: 0, error: 0 }) {
                     </svg>
                     Orchids 账号
                     <span class="nav-badge" id="nav-orchids-count">${stats.orchids || 0}</span>
+                </a>
+                <a href="#" class="nav-item" data-page="ami">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <path d="M12 16v-4"/>
+                        <path d="M12 8h.01"/>
+                    </svg>
+                    AMI 账号
+                    <span class="nav-badge" id="nav-ami-count">${stats.ami || 0}</span>
                 </a>
                 <a href="#" class="nav-item" data-page="warp">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -429,12 +439,13 @@ function getSidebarHTML(stats = { total: 0, active: 0, error: 0 }) {
 // ============ 更新侧边栏统计 ============
 async function updateSidebarStats() {
     try {
-        const [credRes, errorRes, geminiRes, warpRes, vertexRes] = await Promise.all([
+        const [credRes, errorRes, geminiRes, warpRes, vertexRes, amiRes] = await Promise.all([
             fetch('/api/credentials', { headers: { 'Authorization': `Bearer ${authToken}` } }),
             fetch('/api/error-credentials', { headers: { 'Authorization': `Bearer ${authToken}` } }),
             fetch('/api/gemini/credentials', { headers: { 'Authorization': `Bearer ${authToken}` } }),
             fetch('/api/warp/statistics', { headers: { 'Authorization': `Bearer ${authToken}` } }),
-            fetch('/api/vertex/statistics', { headers: { 'Authorization': `Bearer ${authToken}` } })
+            fetch('/api/vertex/statistics', { headers: { 'Authorization': `Bearer ${authToken}` } }),
+            fetch('/api/ami/statistics', { headers: { 'Authorization': `Bearer ${authToken}` } })
         ]);
 
         const credResult = await credRes.json();
@@ -442,12 +453,14 @@ async function updateSidebarStats() {
         const geminiResult = await geminiRes.json();
         const warpResult = await warpRes.json();
         const vertexResult = await vertexRes.json();
+        const amiResult = await amiRes.json();
 
         const credentials = credResult.success ? credResult.data : [];
         const errors = errorResult.success ? errorResult.data : [];
         const geminiCredentials = geminiResult.success ? geminiResult.data : [];
         const warpStats = warpResult.success ? warpResult.data : { total: 0 };
         const vertexStats = vertexResult || { total: 0 };
+        const amiStats = amiResult.success ? amiResult.data : { total: 0 };
 
         const total = credentials.length;
         const active = credentials.filter(c => c.isActive).length;
@@ -455,6 +468,7 @@ async function updateSidebarStats() {
         const geminiCount = geminiCredentials.length;
         const warpCount = warpStats.total || 0;
         const vertexCount = vertexStats.total || 0;
+        const amiCount = amiStats.total || 0;
 
         // 更新侧边栏数字
         const totalEl = document.getElementById('stat-total');
@@ -464,6 +478,7 @@ async function updateSidebarStats() {
         const navGeminiEl = document.getElementById('nav-gemini-count');
         const navWarpEl = document.getElementById('nav-warp-count');
         const navVertexEl = document.getElementById('nav-vertex-count');
+        const navAmiEl = document.getElementById('nav-ami-count');
 
         if (totalEl) totalEl.textContent = total;
         if (activeEl) activeEl.textContent = active;
@@ -472,11 +487,12 @@ async function updateSidebarStats() {
         if (navGeminiEl) navGeminiEl.textContent = geminiCount;
         if (navWarpEl) navWarpEl.textContent = warpCount;
         if (navVertexEl) navVertexEl.textContent = vertexCount;
+        if (navAmiEl) navAmiEl.textContent = amiCount;
 
-        return { total, active, error: errorCount, gemini: geminiCount, warp: warpCount, vertex: vertexCount };
+        return { total, active, error: errorCount, gemini: geminiCount, warp: warpCount, vertex: vertexCount, ami: amiCount };
     } catch (e) {
         console.error('Update sidebar stats error:', e);
-        return { total: 0, active: 0, error: 0, gemini: 0, warp: 0, vertex: 0 };
+        return { total: 0, active: 0, error: 0, gemini: 0, warp: 0, vertex: 0, ami: 0 };
     }
 }
 
