@@ -61,6 +61,21 @@ const app = express();
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ limit: '50mb', extended: true }));
 
+// JSON 解析错误处理中间件
+app.use((err, req, res, next) => {
+    if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
+        console.error(`[${new Date().toISOString().replace('T', ' ').substring(0, 19)}] [JSON解析错误] ${req.method} ${req.path} - ${err.message}`);
+        return res.status(400).json({
+            error: {
+                message: '请求体 JSON 格式无效',
+                type: 'invalid_request_error',
+                details: err.message
+            }
+        });
+    }
+    next(err);
+});
+
 // 首页 - 重定向到用量查询页面（必须在静态文件中间件之前）
 app.get('/', (req, res) => {
     res.redirect('/pages/usage-query.html');

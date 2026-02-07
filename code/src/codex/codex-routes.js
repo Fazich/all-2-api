@@ -230,6 +230,17 @@ export function setupCodexRoutes(app, authMiddleware) {
         const requestId = 'chatcmpl-' + Date.now() + Math.random().toString(36).substring(2, 8);
 
         try {
+            // 检查请求体是否有效
+            if (!req.body || typeof req.body !== 'object') {
+                console.error(`[Codex] 请求体无效或为空: ${typeof req.body}`);
+                return res.status(400).json({
+                    error: {
+                        message: '请求体无效，请确保发送有效的 JSON 数据',
+                        type: 'invalid_request_error'
+                    }
+                });
+            }
+
             const { model, messages, stream } = req.body;
 
             // 验证模型
@@ -352,6 +363,196 @@ export function setupCodexRoutes(app, authMiddleware) {
                 owned_by: 'openai'
             }))
         });
+    });
+
+    // ============ Codex 原生 API 端点 ============
+
+    // Codex 原生格式 - /codex/responses (SSE 流式)
+    app.post('/codex/responses', async (req, res) => {
+        const startTime = Date.now();
+        const responseId = 'resp_' + Date.now() + Math.random().toString(36).substring(2, 8);
+
+        try {
+            // 检查请求体是否有效
+            if (!req.body || typeof req.body !== 'object') {
+                console.error(`[Codex] /codex/responses 请求体无效`);
+                return res.status(400).json({
+                    error: {
+                        message: '请求体无效',
+                        type: 'invalid_request_error'
+                    }
+                });
+            }
+
+            const { model, input, instructions, stream, reasoning, include, prompt_cache_key } = req.body;
+
+            // 验证模型
+            const targetModel = model || 'gpt-5';
+            if (!CODEX_MODELS.includes(targetModel)) {
+                return res.status(400).json({
+                    error: {
+                        message: `不支持的模型: ${targetModel}，支持的模型: ${CODEX_MODELS.join(', ')}`,
+                        type: 'invalid_request_error'
+                    }
+                });
+            }
+
+            // 获取随机可用凭证
+            const service = await CodexService.fromRandomActive();
+
+            // 设置 SSE 响应头
+            res.setHeader('Content-Type', 'text/event-stream');
+            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Connection', 'keep-alive');
+
+            // 将 Codex 原生 input 格式转换为 messages 格式
+            const messages = [];
+            if (Array.isArray(input)) {
+                for (const item of input) {
+                    if (item.type === 'message' && item.role && item.content) {
+                        let textContent = '';
+                        if (Array.isArray(item.content)) {
+                            textContent = item.content
+                                .map(c => c.text || '')
+                                .join('');
+                        } else if (typeof item.content === 'string') {
+                            textContent = item.content;
+                        }
+                        if (textContent) {
+                            messages.push({ role: item.role, content: textContent });
+                        }
+                    }
+                }
+            }
+
+            const outputItemId = 'item_' + Date.now();
+            let fullText = '';
+
+            // 发送 response.created 事件
+            res.write(`data: ${JSON.stringify({
+                type: 'response.created',
+                response: {
+                    id: responseId,
+                    object: 'response',
+                    created_at: Math.floor(startTime / 1000),
+                    model: targetModel,
+                    status: 'in_progress'
+                }
+            })}\n\n`);
+
+            // 发送 response.output_item.added 事件
+            res.write(`data: ${JSON.stringify({
+                type: 'response.output_item.added',
+                output_index: 0,
+                item: {
+                    id: outputItemId,
+                    type: 'message',
+                    role: 'assistant',
+                    content: []
+                }
+            })}\n\n`);
+
+            // 发送 response.content_part.added 事件
+            res.write(`data: ${JSON.stringify({
+                type: 'response.content_part.added',
+                item_id: outputItemId,
+                output_index: 0,
+                content_index: 0,
+                part: { type: 'output_text', text: '' }
+            })}\n\n`);
+
+            try {
+                for await (const event of service.chatStream(targetModel, messages, { system: instructions })) {
+                    if (event.type === 'content' && event.data) {
+                        fullText += event.data;
+                        // 转换为 Codex 原生 SSE 格式
+                        res.write(`data: ${JSON.stringify({
+                            type: 'response.output_text.delta',
+                            item_id: outputItemId,
+                            output_index: 0,
+                            content_index: 0,
+                            delta: event.data
+                        })}\n\n`);
+                    }
+                }
+
+                // 发送 response.output_text.done 事件
+                res.write(`data: ${JSON.stringify({
+                    type: 'response.output_text.done',
+                    item_id: outputItemId,
+                    output_index: 0,
+                    content_index: 0,
+                    text: fullText
+                })}\n\n`);
+
+                // 发送 response.content_part.done 事件
+                res.write(`data: ${JSON.stringify({
+                    type: 'response.content_part.done',
+                    item_id: outputItemId,
+                    output_index: 0,
+                    content_index: 0,
+                    part: { type: 'output_text', text: fullText }
+                })}\n\n`);
+
+                // 发送 response.output_item.done 事件
+                res.write(`data: ${JSON.stringify({
+                    type: 'response.output_item.done',
+                    output_index: 0,
+                    item: {
+                        id: outputItemId,
+                        type: 'message',
+                        role: 'assistant',
+                        content: [{ type: 'output_text', text: fullText }]
+                    }
+                })}\n\n`);
+
+                // 发送 response.completed 事件（包含必需的 id 字段）
+                const inputTokens = Math.ceil(JSON.stringify(messages).length / 4);
+                const outputTokens = Math.ceil(fullText.length / 4);
+                res.write(`data: ${JSON.stringify({
+                    type: 'response.completed',
+                    response: {
+                        id: responseId,
+                        object: 'response',
+                        created_at: Math.floor(startTime / 1000),
+                        model: targetModel,
+                        status: 'completed',
+                        output: [{
+                            id: outputItemId,
+                            type: 'message',
+                            role: 'assistant',
+                            content: [{ type: 'output_text', text: fullText }]
+                        }],
+                        usage: {
+                            input_tokens: inputTokens,
+                            output_tokens: outputTokens,
+                            total_tokens: inputTokens + outputTokens
+                        }
+                    }
+                })}\n\n`);
+
+                res.end();
+            } catch (streamError) {
+                console.error(`[Codex] /codex/responses 流式请求错误:`, streamError.message);
+                res.write(`data: ${JSON.stringify({
+                    type: 'error',
+                    error: { message: streamError.message, type: 'server_error' }
+                })}\n\n`);
+                res.end();
+            }
+        } catch (error) {
+            console.error(`[Codex] /codex/responses 错误:`, error.message);
+            if (!res.headersSent) {
+                res.status(500).json({
+                    error: {
+                        message: error.message,
+                        type: 'server_error'
+                    }
+                });
+            } else {
+                res.end();
+            }
+        }
     });
 
     console.log('[Codex] 路由已设置');
