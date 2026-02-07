@@ -1054,10 +1054,10 @@ export class KiroService {
         try {
             input = JSON.parse(toolCall.input);
 
-            // 对 Write/Edit 工具进行内容大小检查和警告
+            // 对 Write/Edit 工具进行内容大小检查和警告（仅在非常大时警告）
             if (toolCall.name === 'Write' && input.content) {
                 const contentLength = input.content.length;
-                if (contentLength > 3000) {
+                if (contentLength > 50000) {  // 提高到 50000 字符
                     const message = `Write 内容过大 (${contentLength} 字符)，可能导致写入失败，建议分块写入`;
                     log.warn(`[工具调用] ${message}`);
                     // 异步写入数据库日志
@@ -1066,7 +1066,7 @@ export class KiroService {
             }
             if (toolCall.name === 'Edit' && input.new_string) {
                 const newStringLength = input.new_string.length;
-                if (newStringLength > 3000) {
+                if (newStringLength > 50000) {  // 提高到 50000 字符
                     const message = `Edit new_string 过大 (${newStringLength} 字符)，可能导致写入失败`;
                     log.warn(`[工具调用] ${message}`);
                     // 异步写入数据库日志
