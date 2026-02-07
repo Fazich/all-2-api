@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Codex 账号管理 - Kiro Account Manager</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/css/common.css">
+    <link rel="stylesheet" href="/css/styles.css">
+    <style>
+        .codex-gradient {
+            background: linear-gradient(135deg, #10a37f 0%, #1a7f64 100%);
+        }
+        .codex-icon {
+            background: linear-gradient(135deg, #10a37f 0%, #1a7f64 100%);
+        }
+        .codex-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+            gap: 16px;
+            padding: 16px 0;
+        }
+        .codex-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 16px;
+            transition: all 0.2s ease;
+        }
+        .codex-card:hover {
+            border-color: #10a37f;
+            box-shadow: 0 4px 12px rgba(16, 163, 127, 0.15);
+        }
+        .codex-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 12px;
+            gap: 8px;
+        }
+        .codex-card-info {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex: 1;
+            min-width: 0;
+            overflow: hidden;
+        }
+        .codex-card-avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 10px;
+            background: linear-gradient(135deg, #10a37f 0%, #1a7f64 100%);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 600;
+            font-size: 16px;
+        }
+        .codex-card-name {
+            font-weight: 600;
+            color: var(--text-primary);
+            font-size: 14px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .codex-card-email {
+            font-size: 12px;
+            color: var(--text-secondary);
+            max-width: 150px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .codex-card-body {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        .codex-card-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 13px;
+        }
+        .codex-card-label {
+            color: var(--text-secondary);
+        }
+        .codex-card-value {
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+        .codex-card-actions {
+            display: flex;
+            gap: 6px;
+            margin-top: 12px;
+            padding-top: 12px;
+            border-top: 1px solid var(--border-color);
+        }
+        .codex-card-actions .btn {
+            flex: 1;
+            padding: 8px 10px;
+            font-size: 12px;
+        }
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 4px 8px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        .status-badge.active {
+            background: rgba(34, 197, 94, 0.1);
+            color: #22c55e;
+        }
+        .status-badge.inactive {
+            background: rgba(239, 68, 68, 0.1);
+            color: #ef4444;
+        }
+        .status-badge.warning {
+            background: rgba(245, 158, 11, 0.1);
+            color: #f59e0b;
+        }
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.5);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.2s ease;
+        }
+        .modal-overlay.active {
+            opacity: 1;
+            visibility: visible;
+        }
+        .modal {
+            background: var(--card-bg);
+            border-radius: 16px;
+            width: 90%;
+            max-width: 500px;
+            max-height: 90vh;
+            overflow: auto;
+        }
+        .modal-header {
+            padding: 20px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .modal-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+        .modal-close {
+            background: none;
+            border: none;
+            cursor: pointer;
+            color: var(--text-secondary);
+            padding: 4px;
+        }
+        .modal-body {
+            padding: 20px;
+        }
+        .modal-footer {
+            padding: 16px 20px;
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+        }
+        .form-group {
+            margin-bottom: 16px;
+        }
+        .form-label {
+            display: block;
+            font-size: 14px;
+            font-weight: 500;
+            color: var(--text-primary);
+            margin-bottom: 8px;
+        }
+        .form-input, .form-textarea {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: var(--input-bg);
+            color: var(--text-primary);
+            font-size: 14px;
+        }
+        .form-input:focus, .form-textarea:focus {
+            outline: none;
+            border-color: #10a37f;
+        }
+        .form-textarea {
+            min-height: 100px;
+            resize: vertical;
+            font-family: monospace;
+        }
+        .toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 12px 20px;
+            border-radius: 8px;
+            color: white;
+            font-size: 14px;
+            z-index: 2000;
+            transform: translateY(100px);
+            opacity: 0;
+            transition: all 0.3s ease;
+        }
+        .toast.show {
+            transform: translateY(0);
+            opacity: 1;
+        }
+        .toast.success { background: #22c55e; }
+        .toast.error { background: #ef4444; }
+    </style>
+</head>
+<body>
+    <div class="app-container">
+        <div id="sidebar-container"></div>
+
+        <main class="main-content">
+            <header class="header">
+                <div class="header-left">
+                    <div class="page-title-section">
+                        <div class="page-icon codex-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                                <path d="M2 17l10 5 10-5"/>
+                                <path d="M2 12l10 5 10-5"/>
+                            </svg>
+                        </div>
+                        <div>
+                            <h1 class="page-title">Codex 账号管理</h1>
+                            <p class="page-subtitle">管理您的 OpenAI Codex API 凭证 (GPT-5)</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="header-right">
+                    <button class="btn btn-secondary" id="oauth-btn">
+                        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>
+                            <polyline points="10 17 15 12 10 7"/>
+                            <line x1="15" y1="12" x2="3" y2="12"/>
+                        </svg>
+                        OAuth 登录
+                    </button>
+                    <button class="btn btn-primary" id="add-btn">
+                        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="12" y1="5" x2="12" y2="19"/>
+                            <line x1="5" y1="12" x2="19" y2="12"/>
+                        </svg>
+                        添加凭证
+                    </button>
+                </div>
+            </header>
+
+            <div class="content-area">
+                <div class="stats-bar">
+                    <div class="stat-item">
+                        <span class="stat-label">总计</span>
+                        <span class="stat-value" id="stat-total">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">活跃</span>
+                        <span class="stat-value text-success" id="stat-active">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">错误</span>
+                        <span class="stat-value text-danger" id="stat-error">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">总调用</span>
+                        <span class="stat-value" id="stat-usage">0</span>
+                    </div>
+                </div>
+
+                <div class="codex-grid" id="credentials-grid">
+                    <!-- 凭证卡片将在这里动态生成 -->
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- 添加/编辑凭证模态框 -->
+    <div class="modal-overlay" id="credential-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 class="modal-title" id="modal-title">添加凭证</h3>
+                <button class="modal-close" onclick="closeModal()">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="credential-id">
+                <div class="form-group">
+                    <label class="form-label">名称 *</label>
+                    <input type="text" class="form-input" id="credential-name" placeholder="输入凭证名称">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Refresh Token *</label>
+                    <textarea class="form-textarea" id="credential-refresh-token" placeholder="输入 Refresh Token"></textarea>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">邮箱</label>
+                    <input type="email" class="form-input" id="credential-email" placeholder="输入邮箱（可选）">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">备注</label>
+                    <input type="text" class="form-input" id="credential-note" placeholder="输入备注（可选）">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal()">取消</button>
+                <button class="btn btn-primary" onclick="saveCredential()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+    <div id="toast-container"></div>
+
+    <script src="/js/common.js"></script>
+    <script>
+        let credentials = [];
+
+        // 初始化
+        document.addEventListener('DOMContentLoaded', async () => {
+            // 先加载站点设置
+            await loadSiteSettings();
+
+            // 注入侧边栏
+            document.getElementById('sidebar-container').innerHTML = getSidebarHTML();
+            initSidebar('codex');
+
+            // 更新页面标题
+            const settings = window.siteSettings;
+            document.title = `Codex 账号管理 - ${settings.siteName} ${settings.siteSubtitle}`;
+
+            if (!await checkAuth()) return;
+
+            loadCredentials();
+            loadStatistics();
+            updateSidebarStats();
+
+            document.getElementById('add-btn').addEventListener('click', () => openModal());
+            document.getElementById('oauth-btn').addEventListener('click', startOAuth);
+        });
+
+        // 加载凭证列表
+        async function loadCredentials() {
+            try {
+                const res = await fetch('/api/codex/credentials', {
+                    headers: { 'Authorization': 'Bearer ' + authToken }
+                });
+                const data = await res.json();
+                if (data.success) {
+                    credentials = data.data;
+                    renderCredentials();
+                }
+            } catch (error) {
+                showToast('加载凭证失败: ' + error.message, 'error');
+            }
+        }
+
+        // 加载统计信息
+        async function loadStatistics() {
+            try {
+                const res = await fetch('/api/codex/statistics', {
+                    headers: { 'Authorization': 'Bearer ' + authToken }
+                });
+                const data = await res.json();
+                if (data.success) {
+                    document.getElementById('stat-total').textContent = data.data.total;
+                    document.getElementById('stat-active').textContent = data.data.active;
+                    document.getElementById('stat-error').textContent = data.data.error;
+                    document.getElementById('stat-usage').textContent = data.data.totalUseCount;
+                }
+            } catch (error) {
+                console.error('加载统计失败:', error);
+            }
+        }
+
+        // 渲染凭证卡片
+        function renderCredentials() {
+            const grid = document.getElementById('credentials-grid');
+            if (credentials.length === 0) {
+                grid.innerHTML = '<div class="empty-state">暂无凭证，点击"添加凭证"或"OAuth 登录"开始</div>';
+                return;
+            }
+
+            grid.innerHTML = credentials.map(c => `
+                <div class="codex-card">
+                    <div class="codex-card-header">
+                        <div class="codex-card-info">
+                            <div class="codex-card-avatar">${(c.name || 'C')[0].toUpperCase()}</div>
+                            <div>
+                                <div class="codex-card-name">${escapeHtml(c.name)}</div>
+                                <div class="codex-card-email">${escapeHtml(c.email || '未设置邮箱')}</div>
+                            </div>
+                        </div>
+                        <span class="status-badge ${c.status === 'active' && c.isActive ? 'active' : 'inactive'}">
+                            ${c.status === 'active' && c.isActive ? '正常' : '异常'}
+                        </span>
+                    </div>
+                    <div class="codex-card-body">
+                        <div class="codex-card-row">
+                            <span class="codex-card-label">使用次数</span>
+                            <span class="codex-card-value">${c.useCount || 0}</span>
+                        </div>
+                        <div class="codex-card-row">
+                            <span class="codex-card-label">错误次数</span>
+                            <span class="codex-card-value">${c.errorCount || 0}</span>
+                        </div>
+                        <div class="codex-card-row">
+                            <span class="codex-card-label">过期时间</span>
+                            <span class="codex-card-value">${c.expiresAt ? formatDateTime(c.expiresAt) : '未知'}</span>
+                        </div>
+                    </div>
+                    <div class="codex-card-actions">
+                        <button class="btn btn-secondary" onclick="refreshToken(${c.id})">刷新</button>
+                        <button class="btn btn-secondary" onclick="testCredential(${c.id})">测试</button>
+                        <button class="btn btn-secondary" onclick="editCredential(${c.id})">编辑</button>
+                        <button class="btn btn-danger" onclick="deleteCredential(${c.id})">删除</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        // 打开模态框
+        function openModal(id = null) {
+            const modal = document.getElementById('credential-modal');
+            document.getElementById('modal-title').textContent = id ? '编辑凭证' : '添加凭证';
+            document.getElementById('credential-id').value = id || '';
+
+            if (id) {
+                const c = credentials.find(x => x.id === id);
+                if (c) {
+                    document.getElementById('credential-name').value = c.name || '';
+                    document.getElementById('credential-email').value = c.email || '';
+                    document.getElementById('credential-note').value = c.note || '';
+                    document.getElementById('credential-refresh-token').value = '';
+                }
+            } else {
+                document.getElementById('credential-name').value = '';
+                document.getElementById('credential-email').value = '';
+                document.getElementById('credential-note').value = '';
+                document.getElementById('credential-refresh-token').value = '';
+            }
+
+            modal.classList.add('active');
+        }
+
+        function closeModal() {
+            document.getElementById('credential-modal').classList.remove('active');
+        }
+
+        // 保存凭证
+        async function saveCredential() {
+            const id = document.getElementById('credential-id').value;
+            const name = document.getElementById('credential-name').value.trim();
+            const refreshToken = document.getElementById('credential-refresh-token').value.trim();
+            const email = document.getElementById('credential-email').value.trim();
+            const note = document.getElementById('credential-note').value.trim();
+
+            if (!name) {
+                showToast('请输入名称', 'error');
+                return;
+            }
+
+            if (!id && !refreshToken) {
+                showToast('请输入 Refresh Token', 'error');
+                return;
+            }
+
+            try {
+                const url = id ? `/api/codex/credentials/${id}` : '/api/codex/credentials';
+                const method = id ? 'PUT' : 'POST';
+                const body = { name, email, note };
+                if (refreshToken) body.refreshToken = refreshToken;
+
+                const res = await fetch(url, {
+                    method,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + authToken
+                    },
+                    body: JSON.stringify(body)
+                });
+
+                const data = await res.json();
+                if (data.success) {
+                    showToast(data.message || '保存成功', 'success');
+                    closeModal();
+                    loadCredentials();
+                    loadStatistics();
+                } else {
+                    showToast(data.error || '保存失败', 'error');
+                }
+            } catch (error) {
+                showToast('保存失败: ' + error.message, 'error');
+            }
+        }
+
+        // 编辑凭证
+        function editCredential(id) {
+            openModal(id);
+        }
+
+        // 删除凭证
+        async function deleteCredential(id) {
+            if (!confirm('确定要删除此凭证吗？')) return;
+
+            try {
+                const res = await fetch(`/api/codex/credentials/${id}`, {
+                    method: 'DELETE',
+                    headers: { 'Authorization': 'Bearer ' + authToken }
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast('删除成功', 'success');
+                    loadCredentials();
+                    loadStatistics();
+                } else {
+                    showToast(data.error || '删除失败', 'error');
+                }
+            } catch (error) {
+                showToast('删除失败: ' + error.message, 'error');
+            }
+        }
+
+        // 刷新 Token
+        async function refreshToken(id) {
+            try {
+                showToast('正在刷新 Token...', 'success');
+                const res = await fetch(`/api/codex/credentials/${id}/refresh`, {
+                    method: 'POST',
+                    headers: { 'Authorization': 'Bearer ' + authToken }
+                });
+                const data = await res.json();
+                if (data.success) {
+                    showToast('Token 刷新成功', 'success');
+                    loadCredentials();
+                } else {
+                    showToast(data.error || '刷新失败', 'error');
+                }
+            } catch (error) {
+                showToast('刷新失败: ' + error.message, 'error');
+            }
+        }
+
+        // 测试凭证
+        async function testCredential(id) {
+            try {
+                showToast('正在测试凭证...', 'success');
+                const res = await fetch(`/api/codex/credentials/${id}/test`, {
+                    method: 'POST',
+                    headers: { 'Authorization': 'Bearer ' + authToken }
+                });
+                const data = await res.json();
+                showToast(data.message || (data.success ? '凭证有效' : '凭证无效'), data.success ? 'success' : 'error');
+            } catch (error) {
+                showToast('测试失败: ' + error.message, 'error');
+            }
+        }
+
+        // 启动 OAuth
+        async function startOAuth() {
+            try {
+                showToast('正在启动 OAuth...', 'success');
+                const res = await fetch('/api/codex/oauth/start', {
+                    method: 'POST',
+                    headers: { 'Authorization': 'Bearer ' + authToken }
+                });
+                const data = await res.json();
+                if (data.success && data.authUrl) {
+                    window.open(data.authUrl, '_blank');
+                    showToast('请在新窗口中完成登录', 'success');
+                } else {
+                    showToast(data.error || 'OAuth 启动失败', 'error');
+                }
+            } catch (error) {
+                showToast('OAuth 启动失败: ' + error.message, 'error');
+            }
+        }
+
+        // 工具函数
+        function escapeHtml(str) {
+            if (!str) return '';
+            return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        }
+
+        // 本地 toast 函数（覆盖 common.js 中的版本）
+        function showToast(message, type = 'success') {
+            const toast = document.getElementById('toast');
+            if (toast) {
+                toast.textContent = message;
+                toast.className = `toast ${type} show`;
+                setTimeout(() => toast.classList.remove('show'), 3000);
+            }
+        }
+    </script>
+</body>
+</html>

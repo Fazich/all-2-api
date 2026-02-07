@@ -33,6 +33,9 @@ import { setupGeminiRoutes } from './gemini/gemini-routes.js';
 import { setupVertexRoutes } from './vertex/vertex-routes.js';
 import bedrockRoutes from './bedrock/bedrock-routes.js';
 import { setupAmiRoutes } from './ami/ami-routes.js';
+import { setupCodexRoutes } from './codex/codex-routes.js';
+import { CodexCredentialStore } from './db.js';
+import { CodexService, CODEX_MODELS } from './codex/codex-service.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -5020,6 +5023,10 @@ async function start() {
     // 设置 AMI 路由
     setupAmiRoutes(app, amiStore, verifyApiKey);
     console.log(`[${getTimestamp()}] AMI 服务已启动`);
+
+    // 设置 Codex 路由
+    setupCodexRoutes(app, authMiddleware);
+    console.log(`[${getTimestamp()}] Codex 服务已启动`);
 
     // 启动定时刷新任务
     startCredentialsRefreshTask();

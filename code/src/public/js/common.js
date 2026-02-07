@@ -230,6 +230,7 @@ function navigateTo(page) {
         'ami': '/pages/ami.html',
         'warp': '/pages/warp.html',
         'vertex': '/pages/vertex.html',
+        'codex': '/pages/codex.html',
         'chat': '/pages/chat.html',
         'error-accounts': '/pages/error-accounts.html',
         'api-keys': '/pages/api-keys.html',
@@ -318,6 +319,15 @@ function getSidebarHTML(stats = { total: 0, active: 0, error: 0 }) {
                     </svg>
                     Vertex AI
                     <span class="nav-badge" id="nav-vertex-count">${stats.vertex || 0}</span>
+                </a>
+                <a href="#" class="nav-item" data-page="codex">
+                    <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                        <path d="M2 17l10 5 10-5"/>
+                        <path d="M2 12l10 5 10-5"/>
+                    </svg>
+                    Codex 账号
+                    <span class="nav-badge" id="nav-codex-count">${stats.codex || 0}</span>
                 </a>
                 <a href="#" class="nav-item" data-page="oauth">
                     <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -439,13 +449,14 @@ function getSidebarHTML(stats = { total: 0, active: 0, error: 0 }) {
 // ============ 更新侧边栏统计 ============
 async function updateSidebarStats() {
     try {
-        const [credRes, errorRes, geminiRes, warpRes, vertexRes, amiRes] = await Promise.all([
+        const [credRes, errorRes, geminiRes, warpRes, vertexRes, amiRes, codexRes] = await Promise.all([
             fetch('/api/credentials', { headers: { 'Authorization': `Bearer ${authToken}` } }),
             fetch('/api/error-credentials', { headers: { 'Authorization': `Bearer ${authToken}` } }),
             fetch('/api/gemini/credentials', { headers: { 'Authorization': `Bearer ${authToken}` } }),
             fetch('/api/warp/statistics', { headers: { 'Authorization': `Bearer ${authToken}` } }),
             fetch('/api/vertex/statistics', { headers: { 'Authorization': `Bearer ${authToken}` } }),
-            fetch('/api/ami/statistics', { headers: { 'Authorization': `Bearer ${authToken}` } })
+            fetch('/api/ami/statistics', { headers: { 'Authorization': `Bearer ${authToken}` } }),
+            fetch('/api/codex/statistics', { headers: { 'Authorization': `Bearer ${authToken}` } })
         ]);
 
         const credResult = await credRes.json();
@@ -454,6 +465,7 @@ async function updateSidebarStats() {
         const warpResult = await warpRes.json();
         const vertexResult = await vertexRes.json();
         const amiResult = await amiRes.json();
+        const codexResult = await codexRes.json();
 
         const credentials = credResult.success ? credResult.data : [];
         const errors = errorResult.success ? errorResult.data : [];
@@ -461,6 +473,7 @@ async function updateSidebarStats() {
         const warpStats = warpResult.success ? warpResult.data : { total: 0 };
         const vertexStats = vertexResult || { total: 0 };
         const amiStats = amiResult.success ? amiResult.data : { total: 0 };
+        const codexStats = codexResult.success ? codexResult.data : { total: 0 };
 
         const total = credentials.length;
         const active = credentials.filter(c => c.isActive).length;
@@ -469,6 +482,7 @@ async function updateSidebarStats() {
         const warpCount = warpStats.total || 0;
         const vertexCount = vertexStats.total || 0;
         const amiCount = amiStats.total || 0;
+        const codexCount = codexStats.total || 0;
 
         // 更新侧边栏数字
         const totalEl = document.getElementById('stat-total');
@@ -479,6 +493,7 @@ async function updateSidebarStats() {
         const navWarpEl = document.getElementById('nav-warp-count');
         const navVertexEl = document.getElementById('nav-vertex-count');
         const navAmiEl = document.getElementById('nav-ami-count');
+        const navCodexEl = document.getElementById('nav-codex-count');
 
         if (totalEl) totalEl.textContent = total;
         if (activeEl) activeEl.textContent = active;
@@ -488,11 +503,12 @@ async function updateSidebarStats() {
         if (navWarpEl) navWarpEl.textContent = warpCount;
         if (navVertexEl) navVertexEl.textContent = vertexCount;
         if (navAmiEl) navAmiEl.textContent = amiCount;
+        if (navCodexEl) navCodexEl.textContent = codexCount;
 
-        return { total, active, error: errorCount, gemini: geminiCount, warp: warpCount, vertex: vertexCount, ami: amiCount };
+        return { total, active, error: errorCount, gemini: geminiCount, warp: warpCount, vertex: vertexCount, ami: amiCount, codex: codexCount };
     } catch (e) {
         console.error('Update sidebar stats error:', e);
-        return { total: 0, active: 0, error: 0, gemini: 0, warp: 0, vertex: 0, ami: 0 };
+        return { total: 0, active: 0, error: 0, gemini: 0, warp: 0, vertex: 0, ami: 0, codex: 0 };
     }
 }
 
