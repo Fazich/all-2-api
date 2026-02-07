@@ -4,21 +4,34 @@
 import { CodexCredentialStore } from '../db.js';
 import { CodexService, CODEX_MODELS } from './codex-service.js';
 import { startCodexOAuth, completeCodexOAuth, refreshCodexToken } from './codex-auth.js';
-import {
-    startCodexRegisterTask,
-    getCodexRegisterTask,
-    getAllCodexRegisterTasks,
-    cancelCodexRegisterTask,
-    REGISTER_CONFIG,
-    startLoginTask,
-    getLoginTask,
-    getAllLoginTasks
-} from '../../register/codex-register.js';
+
+// 可选导入：注册模块（Docker 容器中可能不存在）
+let registerModule = null;
+try {
+    registerModule = await import('../../register/codex-register.js');
+} catch (e) {
+    console.log('[Codex] 注册模块未找到，注册功能不可用');
+}
+
+const {
+    startCodexRegisterTask = () => { throw new Error('注册功能不可用'); },
+    getCodexRegisterTask = () => null,
+    getAllCodexRegisterTasks = () => [],
+    cancelCodexRegisterTask = () => false,
+    REGISTER_CONFIG = {},
+    startLoginTask = () => { throw new Error('登录功能不可用'); },
+    getLoginTask = () => null,
+    getAllLoginTasks = () => []
+} = registerModule || {};
 
 /**
  * 设置 Codex 路由
+ * @param {Object} app - Express 应用
+ * @param {Function} authMiddleware - 管理后台认证中间件
+ * @param {Function} verifyApiKey - API Key 验证函数
+ * @param {Object} apiLogStore - API 日志存储
  */
-export function setupCodexRoutes(app, authMiddleware) {
+export function setupCodexRoutes(app, authMiddleware, verifyApiKey, apiLogStore) {
     // ============ Codex 凭证管理 API ============
 
     // 获取所有凭证
@@ -561,19 +574,80 @@ export function setupCodexRoutes(app, authMiddleware) {
     app.post('/codex/responses', async (req, res) => {
         const startTime = Date.now();
         const responseId = 'resp_' + Date.now() + Math.random().toString(36).substring(2, 8);
+        const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || 'unknown';
+
+        // 初始化日志数据
+        const logData = {
+            requestId: responseId,
+            endpoint: '/codex/responses',
+            method: 'POST',
+            clientIp,
+            model: req.body?.model || 'gpt-5',
+            inputTokens: 0,
+            outputTokens: 0,
+            statusCode: 200,
+            provider: 'codex'
+        };
+
+        let keyRecord = null;
 
         try {
+            // ============ API Key 验证 ============
+            const authHeader = req.headers.authorization;
+            const apiKey = authHeader?.startsWith('Bearer ') ? authHeader.substring(7) : null;
+
+            if (!apiKey) {
+                logData.statusCode = 401;
+                logData.errorMessage = 'Missing API key';
+                if (apiLogStore) await apiLogStore.create({ ...logData, durationMs: Date.now() - startTime });
+                return res.status(401).json({ error: { message: 'Missing API key', type: 'authentication_error' } });
+            }
+
+            if (verifyApiKey) {
+                keyRecord = await verifyApiKey(apiKey);
+                if (!keyRecord) {
+                    logData.statusCode = 401;
+                    logData.errorMessage = 'Invalid API key';
+                    if (apiLogStore) await apiLogStore.create({ ...logData, durationMs: Date.now() - startTime });
+                    return res.status(401).json({ error: { message: 'Invalid API key', type: 'authentication_error' } });
+                }
+
+                if (!keyRecord.isActive) {
+                    logData.statusCode = 401;
+                    logData.errorMessage = 'API key is disabled';
+                    if (apiLogStore) await apiLogStore.create({ ...logData, durationMs: Date.now() - startTime });
+                    return res.status(401).json({ error: { message: 'API key is disabled', type: 'authentication_error' } });
+                }
+
+                logData.apiKeyId = keyRecord.id;
+                logData.apiKeyPrefix = keyRecord.keyPrefix;
+            }
+
+            // ============ 请求验证 ============
             if (!req.body || typeof req.body !== 'object') {
+                logData.statusCode = 400;
+                logData.errorMessage = '请求体无效';
+                if (apiLogStore) await apiLogStore.create({ ...logData, durationMs: Date.now() - startTime });
                 return res.status(400).json({ error: { message: '请求体无效', type: 'invalid_request_error' } });
             }
 
             const { model, input, instructions, tools, tool_choice, reasoning } = req.body;
             const targetModel = model || 'gpt-5';
+            logData.model = targetModel;
+
             if (!CODEX_MODELS.includes(targetModel)) {
+                logData.statusCode = 400;
+                logData.errorMessage = `不支持的模型: ${targetModel}`;
+                if (apiLogStore) await apiLogStore.create({ ...logData, durationMs: Date.now() - startTime });
                 return res.status(400).json({ error: { message: `不支持的模型: ${targetModel}`, type: 'invalid_request_error' } });
             }
 
             const service = await CodexService.fromRandomActive();
+            logData.credentialId = service.credential?.id;
+            logData.credentialName = service.credential?.name || service.credential?.email;
+
+            // 计算输入 token（估算）
+            logData.inputTokens = Math.ceil(JSON.stringify(input || []).length / 4);
 
             res.setHeader('Content-Type', 'text/event-stream');
             res.setHeader('Cache-Control', 'no-cache');
@@ -656,23 +730,44 @@ export function setupCodexRoutes(app, authMiddleware) {
                     outputItems.push({ id: outputItemId, type: 'message', role: 'assistant', content: [{ type: 'output_text', text: fullText }] });
                 }
 
+                const outputTokens = Math.ceil(fullText.length / 4);
+                logData.outputTokens = outputTokens;
+
                 res.write(`data: ${JSON.stringify({
                     type: 'response.completed',
                     response: {
                         id: responseId, object: 'response', created_at: Math.floor(startTime / 1000), model: targetModel, status: 'completed',
                         output: outputItems,
-                        usage: { input_tokens: Math.ceil(JSON.stringify(messages).length / 4), output_tokens: Math.ceil(fullText.length / 4), total_tokens: Math.ceil((JSON.stringify(messages).length + fullText.length) / 4) }
+                        usage: { input_tokens: logData.inputTokens, output_tokens: outputTokens, total_tokens: logData.inputTokens + outputTokens }
                     }
                 })}\n\n`);
 
                 res.end();
+
+                // 记录成功日志
+                const durationMs = Date.now() - startTime;
+                if (apiLogStore) {
+                    await apiLogStore.create({ ...logData, durationMs });
+                }
+                console.log(`[Codex] ${responseId} | ${logData.apiKeyPrefix || 'no-key'} | ${clientIp} | ${durationMs}ms | in:${logData.inputTokens} out:${outputTokens}`);
             } catch (streamError) {
                 console.error(`[Codex] /codex/responses 流式错误:`, streamError.message);
+                logData.statusCode = 500;
+                logData.errorMessage = streamError.message;
+                if (apiLogStore) {
+                    await apiLogStore.create({ ...logData, durationMs: Date.now() - startTime });
+                }
                 res.write(`data: ${JSON.stringify({ type: 'error', error: { message: streamError.message, type: 'server_error' } })}\n\n`);
                 res.end();
             }
         } catch (error) {
             console.error(`[Codex] /codex/responses 错误:`, error.message);
+            logData.statusCode = 500;
+            logData.errorMessage = error.message;
+            if (apiLogStore && !logData.apiKeyId) {
+                // 仅在未记录过日志时记录
+                await apiLogStore.create({ ...logData, durationMs: Date.now() - startTime });
+            }
             if (!res.headersSent) {
                 res.status(500).json({ error: { message: error.message, type: 'server_error' } });
             } else {

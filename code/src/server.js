@@ -5041,7 +5041,7 @@ async function start() {
     console.log(`[${getTimestamp()}] AMI 服务已启动`);
 
     // 设置 Codex 路由
-    setupCodexRoutes(app, authMiddleware);
+    setupCodexRoutes(app, authMiddleware, verifyApiKey, apiLogStore);
     console.log(`[${getTimestamp()}] Codex 服务已启动`);
 
     // 启动定时刷新任务
