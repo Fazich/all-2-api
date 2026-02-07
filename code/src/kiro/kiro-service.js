@@ -10,8 +10,18 @@ import * as https from 'https';
 import { KIRO_CONSTANTS, MODEL_MAPPING, KIRO_MODELS, buildCodeWhispererUrl } from '../constants.js';
 import { getAxiosProxyConfig } from '../proxy.js';
 import { logger } from '../logger.js';
+import { ToolCallLogStore } from '../db.js';
 
 const log = logger.client;
+
+// 工具调用日志存储（延迟初始化）
+let toolCallLogStore = null;
+async function getToolCallLogStore() {
+    if (!toolCallLogStore) {
+        toolCallLogStore = await ToolCallLogStore.create();
+    }
+    return toolCallLogStore;
+}
 
 // MCP 端点 URL
 const MCP_URL_TEMPLATE = 'https://q.{{region}}.amazonaws.com/mcp';
@@ -1039,8 +1049,62 @@ export class KiroService {
 
     _finalizeToolCall(toolCall) {
         let input = toolCall.input;
-        try { input = JSON.parse(toolCall.input); } catch (e) { }
+        const inputSize = toolCall.input ? toolCall.input.length : 0;
+
+        try {
+            input = JSON.parse(toolCall.input);
+
+            // 对 Write/Edit 工具进行内容大小检查和警告
+            if (toolCall.name === 'Write' && input.content) {
+                const contentLength = input.content.length;
+                if (contentLength > 3000) {
+                    const message = `Write 内容过大 (${contentLength} 字符)，可能导致写入失败，建议分块写入`;
+                    log.warn(`[工具调用] ${message}`);
+                    // 异步写入数据库日志
+                    this._logToolCallToDb('WARN', toolCall, message, inputSize, input.file_path);
+                }
+            }
+            if (toolCall.name === 'Edit' && input.new_string) {
+                const newStringLength = input.new_string.length;
+                if (newStringLength > 3000) {
+                    const message = `Edit new_string 过大 (${newStringLength} 字符)，可能导致写入失败`;
+                    log.warn(`[工具调用] ${message}`);
+                    // 异步写入数据库日志
+                    this._logToolCallToDb('WARN', toolCall, message, inputSize, input.file_path);
+                }
+            }
+        } catch (e) {
+            // JSON 解析失败，记录警告
+            if (toolCall.input && toolCall.input.length > 100) {
+                const message = `${toolCall.name} 输入 JSON 解析失败: ${e.message}`;
+                log.warn(`[工具调用] ${message}`);
+                // 异步写入数据库日志
+                this._logToolCallToDb('ERROR', toolCall, message, inputSize);
+            }
+        }
         return { toolUseId: toolCall.toolUseId, name: toolCall.name, input };
+    }
+
+    /**
+     * 异步写入工具调用日志到数据库
+     */
+    async _logToolCallToDb(logLevel, toolCall, message, inputSize, inputPreview = null) {
+        try {
+            const store = await getToolCallLogStore();
+            await store.log({
+                credentialId: this.credential?.id || null,
+                credentialName: this.credential?.name || null,
+                toolName: toolCall.name,
+                toolUseId: toolCall.toolUseId,
+                inputSize: inputSize,
+                logLevel: logLevel,
+                message: message,
+                inputPreview: inputPreview ? inputPreview.substring(0, 255) : null
+            });
+        } catch (err) {
+            // 写入数据库失败不影响主流程
+            log.error(`[工具调用日志] 写入数据库失败: ${err.message}`);
+        }
     }
 
     listModels() {

@@ -67,10 +67,13 @@ CRITICAL: Follow these rules to avoid "Error writing file" errors:
 3. Include 3-5 lines of context before and after the change point to ensure uniqueness
 4. Make small, focused changes - one edit at a time
 5. If edit fails, re-read the file and try again with the exact content
+6. For large file writes, split content into chunks of max 3KB each and write sequentially
+7. Never write more than 3000 characters in a single Write tool call
 
 Common errors:
 - "not found": old_string doesn't match - re-read file first
 - "not unique": add more context lines to old_string
+- "Error writing file": content too large - split into smaller chunks
 </file_editing_rules>
 `,
 };

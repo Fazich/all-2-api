@@ -439,6 +439,27 @@ export async function initDatabase() {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
 
+    // 创建工具调用日志表
+    await pool.execute(`
+        CREATE TABLE IF NOT EXISTS tool_call_logs (
+            id INT PRIMARY KEY AUTO_INCREMENT,
+            request_id VARCHAR(100),
+            credential_id INT,
+            credential_name VARCHAR(255),
+            tool_name VARCHAR(100) NOT NULL,
+            tool_use_id VARCHAR(100),
+            input_size INT DEFAULT 0,
+            log_level VARCHAR(20) DEFAULT 'INFO',
+            message TEXT,
+            input_preview TEXT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_created_at (created_at),
+            INDEX idx_tool_name (tool_name),
+            INDEX idx_log_level (log_level),
+            INDEX idx_credential_id (credential_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
     return pool;
 }
 
@@ -3528,6 +3549,176 @@ export class AmiCredentialStore {
             lastErrorMessage: row.last_error_message,
             createdAt: row.created_at,
             updatedAt: row.updated_at
+        };
+    }
+}
+
+/**
+ * 工具调用日志管理类
+ */
+export class ToolCallLogStore {
+    constructor(database) {
+        this.db = database;
+    }
+
+    static async create() {
+        const database = await getDatabase();
+        return new ToolCallLogStore(database);
+    }
+
+    /**
+     * 记录工具调用日志
+     */
+    async log(logData) {
+        try {
+            const [result] = await this.db.execute(`
+                INSERT INTO tool_call_logs (
+                    request_id, credential_id, credential_name,
+                    tool_name, tool_use_id, input_size,
+                    log_level, message, input_preview
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `, [
+                logData.requestId || null,
+                logData.credentialId || null,
+                logData.credentialName || null,
+                logData.toolName,
+                logData.toolUseId || null,
+                logData.inputSize || 0,
+                logData.logLevel || 'INFO',
+                logData.message || null,
+                logData.inputPreview || null
+            ]);
+            return result.insertId;
+        } catch (error) {
+            console.error('[ToolCallLogStore] 写入日志失败:', error.message);
+            return null;
+        }
+    }
+
+    /**
+     * 记录警告日志
+     */
+    async warn(toolName, message, extra = {}) {
+        return this.log({
+            ...extra,
+            toolName,
+            message,
+            logLevel: 'WARN'
+        });
+    }
+
+    /**
+     * 记录错误日志
+     */
+    async error(toolName, message, extra = {}) {
+        return this.log({
+            ...extra,
+            toolName,
+            message,
+            logLevel: 'ERROR'
+        });
+    }
+
+    /**
+     * 获取日志列表
+     */
+    async getAll(options = {}) {
+        const { page = 1, pageSize = 100, toolName, logLevel, startDate, endDate } = options;
+        const limit = parseInt(pageSize) || 100;
+        const offset = ((parseInt(page) || 1) - 1) * limit;
+
+        let query = 'SELECT * FROM tool_call_logs WHERE 1=1';
+        const params = [];
+
+        if (toolName) {
+            query += ' AND tool_name = ?';
+            params.push(toolName);
+        }
+        if (logLevel) {
+            query += ' AND log_level = ?';
+            params.push(logLevel);
+        }
+        if (startDate) {
+            query += ' AND created_at >= ?';
+            params.push(startDate);
+        }
+        if (endDate) {
+            query += ' AND created_at <= ?';
+            params.push(endDate);
+        }
+
+        const countQuery = query.replace('SELECT *', 'SELECT COUNT(*) as total');
+        const [countRows] = await this.db.execute(countQuery, params);
+        const total = Number(countRows[0].total) || 0;
+
+        query += ` ORDER BY created_at DESC LIMIT ${limit} OFFSET ${offset}`;
+        const [rows] = await this.db.execute(query, params);
+
+        return {
+            logs: rows.map(row => this._mapRow(row)),
+            total,
+            page: parseInt(page) || 1,
+            pageSize: limit,
+            totalPages: Math.ceil(total / limit)
+        };
+    }
+
+    /**
+     * 获取统计信息
+     */
+    async getStats(options = {}) {
+        const { startDate, endDate } = options;
+        let query = `
+            SELECT
+                tool_name as toolName,
+                log_level as logLevel,
+                COUNT(*) as count
+            FROM tool_call_logs
+            WHERE 1=1
+        `;
+        const params = [];
+
+        if (startDate) {
+            query += ' AND created_at >= ?';
+            params.push(startDate);
+        }
+        if (endDate) {
+            query += ' AND created_at <= ?';
+            params.push(endDate);
+        }
+
+        query += ' GROUP BY tool_name, log_level ORDER BY count DESC';
+
+        const [rows] = await this.db.execute(query, params);
+        return rows;
+    }
+
+    /**
+     * 清理旧日志
+     */
+    async cleanOldLogs(daysToKeep = 30) {
+        const cutoffDate = new Date();
+        cutoffDate.setDate(cutoffDate.getDate() - daysToKeep);
+        const [result] = await this.db.execute(
+            'DELETE FROM tool_call_logs WHERE created_at < ?',
+            [cutoffDate.toISOString().replace('T', ' ').substring(0, 19)]
+        );
+        return result.affectedRows;
+    }
+
+    _mapRow(row) {
+        return {
+            id: row.id,
+            requestId: row.request_id,
+            credentialId: row.credential_id,
+            credentialName: row.credential_name,
+            toolName: row.tool_name,
+            toolUseId: row.tool_use_id,
+            inputSize: row.input_size,
+            logLevel: row.log_level,
+            message: row.message,
+            inputPreview: row.input_preview,
+            createdAt: row.created_at
         };
     }
 }
