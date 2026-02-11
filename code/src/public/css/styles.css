@@ -3044,3 +3044,102 @@ body {
         min-width: 120px;
     }
 }
+
+/* ============ Ranking Page Styles ============ */
+
+/* 排名徽章 */
+.rank-badge {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.rank-badge.rank-1 {
+    background: linear-gradient(135deg, #ffd700, #ffb800);
+    color: #1a1a1a;
+    box-shadow: 0 2px 8px rgba(255, 215, 0, 0.4);
+}
+
+.rank-badge.rank-2 {
+    background: linear-gradient(135deg, #c0c0c0, #a8a8a8);
+    color: #1a1a1a;
+    box-shadow: 0 2px 8px rgba(192, 192, 192, 0.4);
+}
+
+.rank-badge.rank-3 {
+    background: linear-gradient(135deg, #cd7f32, #b87333);
+    color: #fff;
+    box-shadow: 0 2px 8px rgba(205, 127, 50, 0.4);
+}
+
+.rank-badge.rank-other {
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+}
+
+/* 费用值 */
+.cost-value {
+    color: var(--accent-warning);
+    font-weight: 600;
+}
+
+/* Key 前缀 */
+.key-prefix {
+    background: var(--bg-tertiary);
+    padding: 2px 6px;
+    border-radius: var(--radius-xs);
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+/* 错误行 */
+.error-row {
+    background: var(--accent-danger-bg) !important;
+}
+
+.error-detail-row {
+    background: var(--bg-tertiary) !important;
+}
+
+/* 状态徽章 */
+.status-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.status-badge.status-success {
+    background: var(--accent-success-bg);
+    color: var(--accent-success);
+}
+
+.status-badge.status-error {
+    background: var(--accent-danger-bg);
+    color: var(--accent-danger);
+}
+
+/* 分页 */
+.pagination {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+/* 空状态 */
+.empty-state {
+    text-align: center;
+    padding: 60px 20px;
+    color: var(--text-muted);
+}
+
+.empty-state p {
+    font-size: 14px;
+}

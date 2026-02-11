@@ -118,11 +118,194 @@ let pricingStore = null;
 // 凭据 403 错误计数器
 const credential403Counter = new Map();
 
+// ============ SSE 流式响应保护 ============
+// 确保 SSE/stream 响应不被压缩，避免客户端收到破碎 chunk
+// 通过设置响应头禁用压缩（兼容各种反向代理）
+function disableCompressionForSSE(res) {
+    res.setHeader('X-Accel-Buffering', 'no');  // nginx
+    res.setHeader('Cache-Control', 'no-cache, no-transform');
+    res.removeHeader('Content-Encoding');
+}
+
 // API 密钥 + IP 并发请求跟踪器 (key: `${apiKeyId}:${ip}`)
 const apiKeyIpConcurrentRequests = new Map();
 
 // API 密钥速率限制跟踪器 (每分钟请求数)
 const apiKeyRateLimiter = new Map();
+
+// ============ 统一 API Key 解析 ============
+
+/**
+ * 统一解析 API Key，兼容多种格式：
+ * - Authorization: Bearer xxx
+ * - Authorization: bearer xxx（大小写不敏感）
+ * - X-API-Key: xxx
+ * - 额外空格/引号自动清理
+ * @param {object} headers - 请求头对象
+ * @returns {string|null} - 解析出的 API Key，无效时返回 null
+ */
+function parseApiKey(headers) {
+    // 优先从 X-API-Key 获取
+    let apiKey = headers['x-api-key'];
+
+    // 如果没有，尝试从 Authorization 获取
+    if (!apiKey) {
+        const auth = headers['authorization'];
+        if (auth) {
+            // 大小写不敏感匹配 Bearer 前缀
+            apiKey = auth.replace(/^bearer\s+/i, '');
+        }
+    }
+
+    // 清理：去除首尾空格和引号
+    if (apiKey) {
+        apiKey = apiKey.trim().replace(/^["']|["']$/g, '');
+    }
+
+    return apiKey || null;
+}
+
+/**
+ * 规范化 max_tokens 参数，防止异常值
+ * @param {any} maxTokens - 原始 max_tokens 值
+ * @param {number} defaultValue - 默认值（默认 4096）
+ * @param {number} maxLimit - 硬上限（默认 128000）
+ * @returns {number} - 规范化后的值
+ */
+function normalizeMaxTokens(maxTokens, defaultValue = 4096, maxLimit = 128000) {
+    if (maxTokens === undefined || maxTokens === null) {
+        return defaultValue;
+    }
+
+    const parsed = parseInt(maxTokens, 10);
+
+    // 非法值返回默认值
+    if (isNaN(parsed) || parsed <= 0) {
+        return defaultValue;
+    }
+
+    // 钳制到硬上限
+    return Math.min(parsed, maxLimit);
+}
+
+// ============ 流式响应工具调用保护 (TokenGuard) ============
+
+/**
+ * TokenGuard: 检测流式响应是否因 max_tokens 截断
+ * 当检测到截断时，停止拼接工具调用参数，避免无效 JSON
+ * @param {string} stopReason - 停止原因
+ * @returns {boolean} - 是否被截断
+ */
+function isResponseTruncated(stopReason) {
+    return stopReason === 'max_tokens' || stopReason === 'length';
+}
+
+/**
+ * 安全解析工具调用参数
+ * 如果参数是不完整的 JSON，返回空对象而不是抛出错误
+ * @param {string|object} input - 工具调用参数
+ * @returns {object} - 解析后的参数对象
+ */
+function safeParseToolInput(input) {
+    if (!input) return {};
+    if (typeof input === 'object') return input;
+
+    try {
+        return JSON.parse(input);
+    } catch (e) {
+        // JSON 不完整，返回原始字符串包装
+        console.warn(`[TokenGuard] 工具参数 JSON 解析失败，可能被截断: ${input.substring(0, 100)}...`);
+        return { _raw_truncated: input };
+    }
+}
+
+// ============ 流式响应超时与断开检测 ============
+
+const STREAM_CONFIG = {
+    timeoutMs: 5 * 60 * 1000,  // 流式响应总超时：5分钟
+    idleTimeoutMs: 60 * 1000   // 空闲超时：60秒无数据
+};
+
+/**
+ * 创建流式响应控制器
+ * 提供超时保护和客户端断开检测
+ * @param {Request} req - Express 请求对象
+ * @param {Response} res - Express 响应对象
+ * @param {object} options - 配置选项
+ * @returns {object} - 控制器对象
+ */
+function createStreamController(req, res, options = {}) {
+    const timeoutMs = options.timeoutMs || STREAM_CONFIG.timeoutMs;
+    const idleTimeoutMs = options.idleTimeoutMs || STREAM_CONFIG.idleTimeoutMs;
+
+    let isAborted = false;
+    let totalTimeout = null;
+    let idleTimeout = null;
+    let onAbortCallback = null;
+
+    // 监听客户端断开
+    const handleClose = () => {
+        if (!isAborted) {
+            isAborted = true;
+            cleanup();
+            if (onAbortCallback) onAbortCallback('client_disconnected');
+        }
+    };
+
+    req.on('close', handleClose);
+    req.on('aborted', handleClose);
+
+    // 设置总超时
+    totalTimeout = setTimeout(() => {
+        if (!isAborted) {
+            isAborted = true;
+            cleanup();
+            if (onAbortCallback) onAbortCallback('timeout');
+        }
+    }, timeoutMs);
+
+    // 重置空闲超时
+    const resetIdleTimeout = () => {
+        if (idleTimeout) clearTimeout(idleTimeout);
+        idleTimeout = setTimeout(() => {
+            if (!isAborted) {
+                isAborted = true;
+                cleanup();
+                if (onAbortCallback) onAbortCallback('idle_timeout');
+            }
+        }, idleTimeoutMs);
+    };
+
+    // 初始化空闲超时
+    resetIdleTimeout();
+
+    // 清理函数
+    const cleanup = () => {
+        if (totalTimeout) clearTimeout(totalTimeout);
+        if (idleTimeout) clearTimeout(idleTimeout);
+        req.removeListener('close', handleClose);
+        req.removeListener('aborted', handleClose);
+    };
+
+    return {
+        get isAborted() { return isAborted; },
+
+        // 每次写入数据时调用，重置空闲超时
+        touch() {
+            resetIdleTimeout();
+        },
+
+        // 设置中止回调
+        onAbort(callback) {
+            onAbortCallback = callback;
+        },
+
+        // 手动完成流
+        finish() {
+            cleanup();
+        }
+    };
+}
 
 // ============ 凭据健康状态管理（参照 AIClient-2-API） ============
 // 凭据健康状态：{ isHealthy, errorCount, lastErrorTime, lastErrorMessage, lastUsed, usageCount }
@@ -1502,9 +1685,9 @@ app.get('/api/keys/:id/limits-status', authMiddleware, async (req, res) => {
         const currentConcurrent = getTotalConcurrentCount(id);
 
         // 计算费用
-        const dailyCost = calculateApiKeyCost(id, { startDate: todayStart });
-        const monthlyCost = calculateApiKeyCost(id, { startDate: monthStart });
-        const totalCost = calculateApiKeyCost(id, {});
+        const dailyCost = await calculateApiKeyCost(id, { startDate: todayStart });
+        const monthlyCost = await calculateApiKeyCost(id, { startDate: monthStart });
+        const totalCost = await calculateApiKeyCost(id, {});
 
         // 计算有效期剩余天数
         let remainingDays = null;
@@ -1686,7 +1869,7 @@ app.post('/v1/messages', async (req, res) => {
     };
 
     try {
-        const apiKey = req.headers['x-api-key'] || req.headers['authorization']?.replace('Bearer ', '');
+        const apiKey = parseApiKey(req.headers);
         const keyPrefix = apiKey ? apiKey.substring(0, 8) : '?';
         const reqModel = req.body?.model;
         const reqStream = req.body?.stream;
@@ -1802,6 +1985,7 @@ app.post('/v1/messages', async (req, res) => {
                     res.setHeader('Content-Type', 'text/event-stream');
                     res.setHeader('Cache-Control', 'no-cache');
                     res.setHeader('Connection', 'keep-alive');
+                    disableCompressionForSSE(res);
                     res.setHeader('X-Accel-Buffering', 'no');
 
                     let outputTokens = 0;
@@ -1897,6 +2081,7 @@ app.post('/v1/messages', async (req, res) => {
             res.setHeader('Content-Type', 'text/event-stream');
             res.setHeader('Cache-Control', 'no-cache');
             res.setHeader('Connection', 'keep-alive');
+            disableCompressionForSSE(res);
 
             let credential = null;
             let fullText = '';
@@ -2326,7 +2511,7 @@ async function handleOrchidsRequest(req, res) {
 
     try {
         // API Key 认证
-        const apiKey = req.headers['x-api-key'] || req.headers['authorization']?.replace('Bearer ', '');
+        const apiKey = parseApiKey(req.headers);
         if (!apiKey) {
             logData.statusCode = 401;
             logData.errorMessage = 'Missing API key';
@@ -2407,7 +2592,7 @@ async function handleOrchidsRequest(req, res) {
                 res.setHeader('Content-Type', 'text/event-stream');
                 res.setHeader('Cache-Control', 'no-cache');
                 res.setHeader('Connection', 'keep-alive');
-                res.setHeader('X-Accel-Buffering', 'no');
+                disableCompressionForSSE(res);
 
                 let outputTokens = 0;
                 for await (const event of orchidsService.generateContentStream(model, requestBody)) {
@@ -2546,7 +2731,7 @@ async function handleGeminiAntigravityRequest(req, res) {
 
     try {
         // API Key 认证
-        const apiKey = req.headers['x-api-key'] || req.headers['authorization']?.replace('Bearer ', '');
+        const apiKey = parseApiKey(req.headers);
         if (!apiKey) {
             logData.statusCode = 401;
             logData.errorMessage = 'Missing API key';
@@ -2651,6 +2836,7 @@ async function handleGeminiAntigravityRequest(req, res) {
                     res.setHeader('Content-Type', 'text/event-stream');
                     res.setHeader('Cache-Control', 'no-cache');
                     res.setHeader('Connection', 'keep-alive');
+                    disableCompressionForSSE(res);
 
                     const messageId = 'msg_' + Date.now() + Math.random().toString(36).substring(2, 8);
 
@@ -2809,7 +2995,7 @@ app.post('/v1/chat/completions', async (req, res) => {
     };
 
     try {
-        const apiKey = req.headers['authorization']?.replace('Bearer ', '');
+        const apiKey = parseApiKey(req.headers);
         if (!apiKey) {
             logData.statusCode = 401;
             logData.errorMessage = 'Missing API key';
@@ -2940,6 +3126,7 @@ app.post('/v1/chat/completions', async (req, res) => {
             res.setHeader('Content-Type', 'text/event-stream');
             res.setHeader('Cache-Control', 'no-cache');
             res.setHeader('Connection', 'keep-alive');
+            disableCompressionForSSE(res);
 
             let fullText = '';
             let outputTokens = 0;
@@ -4610,6 +4797,111 @@ app.get('/api/logs-stats/by-api-key', authMiddleware, async (req, res) => {
     }
 });
 
+// 获取最近24小时使用排行榜
+app.get('/api/logs-stats/ranking', authMiddleware, async (req, res) => {
+    try {
+        if (!req.user.isAdmin) {
+            return res.status(403).json({ success: false, error: '需要管理员权限' });
+        }
+
+        const { hours = 24, limit = 5, orderBy = 'tokens' } = req.query;
+
+        const ranking = await apiLogStore.getUsageRanking({
+            hours: parseInt(hours),
+            limit: parseInt(limit),
+            orderBy
+        });
+
+        // 计算每个 API Key 的费用
+        const rankingWithCost = await Promise.all(ranking.map(async (item) => {
+            const modelStats = await apiLogStore.getStatsByModel(item.apiKeyId, {
+                startDate: new Date(Date.now() - parseInt(hours) * 60 * 60 * 1000).toISOString().slice(0, 19).replace('T', ' ')
+            });
+
+            let totalCost = 0;
+            for (const stat of modelStats) {
+                const cost = calculateTokenCost(stat.model, stat.inputTokens, stat.outputTokens);
+                totalCost += cost.totalCost;
+            }
+
+            return {
+                ...item,
+                totalCost: Math.round(totalCost * 10000) / 10000  // 保留4位小数
+            };
+        }));
+
+        res.json({
+            success: true,
+            data: {
+                hours: parseInt(hours),
+                ranking: rankingWithCost
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// 获取指定 API Key 的调用记录详情
+app.get('/api/logs-stats/ranking/:apiKeyId/history', authMiddleware, async (req, res) => {
+    try {
+        if (!req.user.isAdmin) {
+            return res.status(403).json({ success: false, error: '需要管理员权限' });
+        }
+
+        const apiKeyId = parseInt(req.params.apiKeyId);
+        const { hours = 24, limit = 50, offset = 0 } = req.query;
+
+        const history = await apiLogStore.getCallHistory(apiKeyId, {
+            hours: parseInt(hours),
+            limit: parseInt(limit),
+            offset: parseInt(offset)
+        });
+
+        // 获取 API Key 信息
+        const apiKey = await apiKeyStore.getById(apiKeyId);
+
+        res.json({
+            success: true,
+            data: {
+                apiKey: apiKey ? {
+                    id: apiKey.id,
+                    name: apiKey.name,
+                    keyPrefix: apiKey.keyPrefix
+                } : null,
+                hours: parseInt(hours),
+                ...history
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// 获取指定 API Key 的图表数据（按时间间隔统计）
+app.get('/api/logs-stats/ranking/:apiKeyId/chart', authMiddleware, async (req, res) => {
+    try {
+        if (!req.user.isAdmin) {
+            return res.status(403).json({ success: false, error: '需要管理员权限' });
+        }
+
+        const apiKeyId = parseInt(req.params.apiKeyId);
+        const { hours = 24, interval = 'hour' } = req.query;
+
+        const chartData = await apiLogStore.getUsageByInterval(apiKeyId, {
+            hours: parseInt(hours),
+            interval
+        });
+
+        res.json({
+            success: true,
+            data: chartData
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
 // 获取 API Key 费用统计（按模型分类）
 app.get('/api/keys/:id/cost', authMiddleware, async (req, res) => {
     try {
@@ -4855,6 +5147,7 @@ app.post('/api/chat/:id', async (req, res) => {
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
+        disableCompressionForSSE(res);
 
         // 流式输出
         for await (const event of client.chatStream(messages, model || 'claude-sonnet-4-20250514', { skipTokenRefresh: skipTokenRefresh !== false })) {
@@ -5205,6 +5498,9 @@ async function start() {
     // 启动日志清理任务（每天清理30天前的日志）
     startLogCleanupTask();
 
+    // 启动内存清理任务（定期清理全局 Map）
+    startMemoryCleanupTask();
+
     const PORT = process.env.PORT || 13004;
     app.listen(PORT, () => {
         console.log(`[${getTimestamp()}] Kiro API Server 已启动 | http://localhost:${PORT}`);
@@ -5238,6 +5534,109 @@ function startLogCleanupTask() {
             console.error(`[${getTimestamp()}] [日志清理] 清理失败: ${error.message}`);
         }
     }, CLEANUP_INTERVAL);
+}
+
+/**
+ * 启动内存清理任务
+ * 定期清理全局 Map 中的过期数据，防止内存泄漏
+ */
+function startMemoryCleanupTask() {
+    const CLEANUP_INTERVAL = 30 * 60 * 1000; // 每30分钟执行一次
+    const SESSION_MAX_AGE = 24 * 60 * 60 * 1000; // Session 最大存活时间：24小时
+    const RATE_LIMIT_MAX_AGE = 2 * 60 * 1000; // 速率限制数据最大存活时间：2分钟
+    const HEALTH_STATUS_MAX_AGE = 60 * 60 * 1000; // 健康状态最大存活时间：1小时无更新
+
+    console.log(`[${getTimestamp()}] [内存清理] 任务已启动，每30分钟执行一次`);
+
+    const cleanup = () => {
+        const now = Date.now();
+        let cleanedCount = 0;
+
+        // 清理过期的 Session
+        if (typeof sessions !== 'undefined' && sessions instanceof Map) {
+            for (const [token, session] of sessions.entries()) {
+                if (session.expiresAt && session.expiresAt < now) {
+                    sessions.delete(token);
+                    cleanedCount++;
+                }
+            }
+        }
+
+        // 清理过期的速率限制数据
+        for (const [key, requests] of apiKeyRateLimiter.entries()) {
+            if (Array.isArray(requests)) {
+                const validRequests = requests.filter(ts => now - ts < RATE_LIMIT_MAX_AGE);
+                if (validRequests.length === 0) {
+                    apiKeyRateLimiter.delete(key);
+                    cleanedCount++;
+                } else if (validRequests.length < requests.length) {
+                    apiKeyRateLimiter.set(key, validRequests);
+                }
+            }
+        }
+
+        // 清理并发计数器中值为0的条目
+        for (const [key, count] of apiKeyIpConcurrentRequests.entries()) {
+            if (count <= 0) {
+                apiKeyIpConcurrentRequests.delete(key);
+                cleanedCount++;
+            }
+        }
+
+        // 清理 403 错误计数器中过期的条目（超过1小时未更新）
+        for (const [key, data] of credential403Counter.entries()) {
+            if (data.lastTime && now - data.lastTime > HEALTH_STATUS_MAX_AGE) {
+                credential403Counter.delete(key);
+                cleanedCount++;
+            }
+        }
+
+        // 清理凭据健康状态中长期未使用的条目
+        for (const [credId, status] of credentialHealthStatus.entries()) {
+            if (status.lastUsed && now - new Date(status.lastUsed).getTime() > HEALTH_STATUS_MAX_AGE) {
+                // 只清理健康的、长期未使用的条目
+                if (status.isHealthy && status.errorCount === 0) {
+                    credentialHealthStatus.delete(credId);
+                    cleanedCount++;
+                }
+            }
+        }
+
+        // 清理凭据刷新锁（超过5分钟的锁可能是死锁）
+        const LOCK_MAX_AGE = 5 * 60 * 1000;
+        if (typeof credentialRefreshLocks !== 'undefined' && credentialRefreshLocks instanceof Map) {
+            for (const [credId, lockTime] of credentialRefreshLocks.entries()) {
+                if (typeof lockTime === 'number' && now - lockTime > LOCK_MAX_AGE) {
+                    credentialRefreshLocks.delete(credId);
+                    if (typeof credentialRefreshPromises !== 'undefined') {
+                        credentialRefreshPromises.delete(credId);
+                    }
+                    cleanedCount++;
+                }
+            }
+        }
+
+        // 清理 Gemini 刷新锁
+        if (typeof geminiRefreshLocks !== 'undefined' && geminiRefreshLocks instanceof Map) {
+            for (const [credId, locked] of geminiRefreshLocks.entries()) {
+                // 简单清理：如果锁存在超过5分钟，强制释放
+                geminiRefreshLocks.delete(credId);
+                if (typeof geminiRefreshPromises !== 'undefined') {
+                    geminiRefreshPromises.delete(credId);
+                }
+            }
+        }
+
+        if (cleanedCount > 0) {
+            console.log(`[${getTimestamp()}] [内存清理] 已清理 ${cleanedCount} 个过期条目`);
+        }
+    };
+
+    // 立即执行一次
+    cleanup();
+
+    // 定期执行
+    setInterval(cleanup, CLEANUP_INTERVAL);
 }
 
 /**

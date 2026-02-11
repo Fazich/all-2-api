@@ -75,3 +75,18 @@ services:
     environment:
       <<: *api-env
       PORT: 13008
+
+  # 可选：API 监控服务
+  # 启用: docker-compose -f docker-compose.scale.yml up -d monitor
+  monitor:
+    build: .
+    container_name: kiro-monitor
+    restart: unless-stopped
+    network_mode: host
+    profiles:
+      - monitor
+    environment:
+      - TZ=Asia/Shanghai
+    volumes:
+      - ./logs:/app/logs:ro
+    command: ["bash", "-c", "while true; do echo '=== API Monitor ===' && date && docker logs kiro-api-1 --tail 100 2>/dev/null | grep -E 'tool_call|tool_use|TokenGuard|error|401|403|429|500' | tail -20 && sleep 30; done"]

@@ -307,6 +307,7 @@ function navigateTo(page) {
         'api-keys': '/pages/api-keys.html',
         'packages': '/pages/packages.html',
         'usage': '/pages/usage.html',
+        'ranking': '/pages/ranking.html',
         'logs': '/pages/logs.html',
         'error-logs': '/pages/error-logs.html',
         'proxy': '/pages/proxy.html',
@@ -470,6 +471,12 @@ function getSidebarHTML(stats = { total: 0, active: 0, error: 0 }) {
                             <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
                         </svg>
                         用量统计
+                    </a>
+                    <a href="#" class="nav-item nav-subitem" data-page="ranking">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M18 20V10M12 20V4M6 20v-6"/>
+                        </svg>
+                        使用排行
                     </a>
                     <a href="#" class="nav-item nav-subitem" data-page="trial-admin">
                         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

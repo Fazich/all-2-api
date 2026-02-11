@@ -1318,7 +1318,7 @@ export class ApiLogStore {
     }
 
     async getStatsByModel(apiKeyId, options = {}) {
-        const { startDate, endDate } = options;
+        const { startDate, endDate, includeErrors = false } = options;
         let query = `
             SELECT
                 model,
@@ -1329,6 +1329,11 @@ export class ApiLogStore {
             WHERE api_key_id = ?
         `;
         const params = [apiKeyId];
+
+        // 默认只统计成功请求的 token（用于计费）
+        if (!includeErrors) {
+            query += ' AND status_code = 200';
+        }
 
         if (startDate) {
             query += ' AND created_at >= ?';
@@ -1351,7 +1356,7 @@ export class ApiLogStore {
     }
 
     async getAllStatsByModel(options = {}) {
-        const { startDate, endDate } = options;
+        const { startDate, endDate, includeErrors = false } = options;
         let query = `
             SELECT
                 model,
@@ -1362,6 +1367,11 @@ export class ApiLogStore {
             WHERE 1=1
         `;
         const params = [];
+
+        // 默认只统计成功请求的 token（用于计费）
+        if (!includeErrors) {
+            query += ' AND status_code = 200';
+        }
 
         if (startDate) {
             query += ' AND created_at >= ?';
@@ -1384,7 +1394,7 @@ export class ApiLogStore {
     }
 
     async getStatsByApiKey(options = {}) {
-        const { startDate, endDate } = options;
+        const { startDate, endDate, includeErrors = false } = options;
         let query = `
             SELECT
                 al.api_key_id,
@@ -1398,6 +1408,11 @@ export class ApiLogStore {
             WHERE al.api_key_id IS NOT NULL
         `;
         const params = [];
+
+        // 默认只统计成功请求的 token（用于计费）
+        if (!includeErrors) {
+            query += ' AND al.status_code = 200';
+        }
 
         if (startDate) {
             query += ' AND al.created_at >= ?';
@@ -1415,6 +1430,176 @@ export class ApiLogStore {
             apiKeyId: row.api_key_id,
             apiKeyName: row.apiKeyName || '未知',
             apiKeyPrefix: row.apiKeyPrefix || '',
+            requestCount: Number(row.requestCount) || 0,
+            inputTokens: Number(row.inputTokens) || 0,
+            outputTokens: Number(row.outputTokens) || 0
+        }));
+    }
+
+    /**
+     * 获取使用排行榜（按 API Key）
+     * @param {object} options - 查询选项
+     * @param {number} options.hours - 最近多少小时（默认24）
+     * @param {number} options.limit - 返回数量（默认5）
+     * @param {string} options.orderBy - 排序字段：requests/tokens/cost（默认 tokens）
+     */
+    async getUsageRanking(options = {}) {
+        const { hours = 24, limit = 5, orderBy = 'tokens' } = options;
+
+        // 计算起始时间
+        const startTime = new Date(Date.now() - hours * 60 * 60 * 1000);
+        const startDate = startTime.toISOString().slice(0, 19).replace('T', ' ');
+
+        // 确保 limit 是整数，防止 MySQL execute 报错
+        const limitInt = parseInt(limit, 10) || 5;
+
+        const query = `
+            SELECT
+                al.api_key_id,
+                ak.name as apiKeyName,
+                ak.key_prefix as apiKeyPrefix,
+                COUNT(*) as requestCount,
+                COALESCE(SUM(al.input_tokens), 0) as inputTokens,
+                COALESCE(SUM(al.output_tokens), 0) as outputTokens,
+                COALESCE(SUM(al.input_tokens), 0) + COALESCE(SUM(al.output_tokens), 0) as totalTokens,
+                MIN(al.created_at) as firstRequest,
+                MAX(al.created_at) as lastRequest
+            FROM api_logs al
+            LEFT JOIN api_keys ak ON al.api_key_id = ak.id
+            WHERE al.api_key_id IS NOT NULL
+              AND al.created_at >= ?
+              AND al.status_code = 200
+            GROUP BY al.api_key_id, ak.name, ak.key_prefix
+            ORDER BY ${orderBy === 'requests' ? 'requestCount' : orderBy === 'cost' ? 'totalTokens' : 'totalTokens'} DESC
+            LIMIT ${limitInt}
+        `;
+
+        const [rows] = await this.db.execute(query, [startDate]);
+        return rows.map((row, index) => ({
+            rank: index + 1,
+            apiKeyId: row.api_key_id,
+            apiKeyName: row.apiKeyName || '未知',
+            apiKeyPrefix: row.apiKeyPrefix || '',
+            requestCount: Number(row.requestCount) || 0,
+            inputTokens: Number(row.inputTokens) || 0,
+            outputTokens: Number(row.outputTokens) || 0,
+            totalTokens: Number(row.totalTokens) || 0,
+            firstRequest: row.firstRequest,
+            lastRequest: row.lastRequest
+        }));
+    }
+
+    /**
+     * 获取指定 API Key 的调用记录
+     * @param {number} apiKeyId - API  ID
+     * @param {object} options - 查询选项
+     */
+    async getCallHistory(apiKeyId, options = {}) {
+        const { limit = 50, offset = 0, hours = 24 } = options;
+
+        // 计算起始时间
+        const startTime = new Date(Date.now() - hours * 60 * 60 * 1000);
+        const startDate = startTime.toISOString().slice(0, 19).replace('T', ' ');
+
+        // 确保参数是整数，防止 MySQL execute 报错
+        const apiKeyIdInt = parseInt(apiKeyId, 10);
+        const limitInt = parseInt(limit, 10) || 50;
+        const offsetInt = parseInt(offset, 10) || 0;
+
+        const query = `
+            SELECT
+                id,
+                request_id,
+                model,
+                path,
+                method,
+                input_tokens,
+                output_tokens,
+                status_code,
+                duration_ms,
+                ip_address,
+                error_message,
+                credential_name,
+                created_at
+            FROM api_logs
+            WHERE api_key_id = ?
+              AND created_at >= ?
+            ORDER BY created_at DESC
+            LIMIT ${limitInt} OFFSET ${offsetInt}
+        `;
+
+        const [rows] = await this.db.execute(query, [apiKeyIdInt, startDate]);
+
+        // 获取总数
+        const countQuery = `
+            SELECT COUNT(*) as total
+            FROM api_logs
+            WHERE api_key_id = ? AND created_at >= ?
+        `;
+        const [countRows] = await this.db.execute(countQuery, [apiKeyIdInt, startDate]);
+        const total = Number(countRows[0]?.total) || 0;
+
+        return {
+            records: rows.map(row => ({
+                id: row.id,
+                requestId: row.request_id,
+                model: row.model,
+                path: row.path,
+                method: row.method,
+                inputTokens: Number(row.input_tokens) || 0,
+                outputTokens: Number(row.output_tokens) || 0,
+                statusCode: row.status_code,
+                durationMs: Number(row.duration_ms) || 0,
+                clientIp: row.ip_address,
+                errorMessage: row.error_message,
+                credentialName: row.credential_name,
+                createdAt: row.created_at
+            })),
+            total,
+            limit,
+            offset
+        };
+    }
+
+    /**
+     * 获取指定 API Key 按时间间隔的统计数据（用于图表）
+     * @param {number} apiKeyId - API Key ID
+     * @param {object} options - 查询选项
+     */
+    async getUsageByInterval(apiKeyId, options = {}) {
+        const { hours = 24, interval = 'hour' } = options;
+
+        const startTime = new Date(Date.now() - hours * 60 * 60 * 1000);
+        const startDate = startTime.toISOString().slice(0, 19).replace('T', ' ');
+        const apiKeyIdInt = parseInt(apiKeyId, 10);
+
+        // 根据间隔类型选择时间格式
+        let dateFormat;
+        if (interval === 'day') {
+            dateFormat = '%Y-%m-%d';
+        } else if (interval === 'minute') {
+            dateFormat = '%Y-%m-%d %H:%i';
+        } else {
+            dateFormat = '%Y-%m-%d %H:00';
+        }
+
+        const query = `
+            SELECT
+                DATE_FORMAT(created_at, '${dateFormat}') as time_bucket,
+                COUNT(*) as requestCount,
+                COALESCE(SUM(input_tokens), 0) as inputTokens,
+                COALESCE(SUM(output_tokens), 0) as outputTokens
+            FROM api_logs
+            WHERE api_key_id = ?
+              AND created_at >= ?
+              AND status_code = 200
+            GROUP BY time_bucket
+            ORDER BY time_bucket ASC
+        `;
+
+        const [rows] = await this.db.execute(query, [apiKeyIdInt, startDate]);
+        return rows.map(row => ({
+            time: row.time_bucket,
             requestCount: Number(row.requestCount) || 0,
             inputTokens: Number(row.inputTokens) || 0,
             outputTokens: Number(row.outputTokens) || 0
