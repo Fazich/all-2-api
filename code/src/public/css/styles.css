@@ -385,6 +385,9 @@ body {
 .btn-danger { background: var(--accent-danger); color: white; }
 .btn-danger:hover { opacity: 0.9; }
 
+.btn-success { background: linear-gradient(135deg, #10b981, #059669); color: white; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.3); text-decoration: none; }
+.btn-success:hover { transform: translateY(-1px); box-shadow: 0 4px 16px rgba(16, 185, 129, 0.4); }
+
 .btn-ghost { background: transparent; color: var(--text-secondary); padding: 8px; }
 .btn-ghost:hover { background: var(--bg-tertiary); color: var(--text-primary); }
 
