@@ -128,28 +128,38 @@ class AwsSignatureV4 {
 export class BedrockClient {
     /**
      * @param {Object} options - 配置选项
-     * @param {string} options.accessKeyId - AWS Access Key ID
-     * @param {string} options.secretAccessKey - AWS Secret Access Key
-     * @param {string} options.sessionToken - AWS Session Token (可选)
+     * @param {string} options.accessKeyId - AWS Access Key ID (IAM 认证)
+     * @param {string} options.secretAccessKey - AWS Secret Access Key (IAM 认证)
+     * @param {string} options.sessionToken - AWS Session Token (可选，IAM 认证)
+     * @param {string} options.bearerToken - Bearer Token (Bearer Token 认证)
      * @param {string} options.region - AWS 区域 (默认 us-east-1)
      */
     constructor(options = {}) {
-        if (!options.accessKeyId || !options.secretAccessKey) {
-            throw new Error('accessKeyId 和 secretAccessKey 是必需的');
-        }
-
-        this.accessKeyId = options.accessKeyId;
-        this.secretAccessKey = options.secretAccessKey;
-        this.sessionToken = options.sessionToken;
         this.region = options.region || BEDROCK_CONSTANTS.DEFAULT_REGION;
+        this.bearerToken = options.bearerToken;
 
-        this.signer = new AwsSignatureV4({
-            accessKeyId: this.accessKeyId,
-            secretAccessKey: this.secretAccessKey,
-            sessionToken: this.sessionToken,
-            region: this.region,
-            service: 'bedrock'
-        });
+        // 判断认证方式
+        if (options.bearerToken) {
+            // Bearer Token 认证
+            this.authType = 'bearer';
+            this.signer = null;
+        } else if (options.accessKeyId && options.secretAccessKey) {
+            // IAM 签名认证
+            this.authType = 'iam';
+            this.accessKeyId = options.accessKeyId;
+            this.secretAccessKey = options.secretAccessKey;
+            this.sessionToken = options.sessionToken;
+
+            this.signer = new AwsSignatureV4({
+                accessKeyId: this.accessKeyId,
+                secretAccessKey: this.secretAccessKey,
+                sessionToken: this.sessionToken,
+                region: this.region,
+                service: 'bedrock'
+            });
+        } else {
+            throw new Error('需要提供 bearerToken 或 (accessKeyId + secretAccessKey)');
+        }
 
         this.axiosInstance = axios.create({
             timeout: BEDROCK_CONSTANTS.AXIOS_TIMEOUT,
@@ -161,6 +171,12 @@ export class BedrockClient {
      * 从凭据对象创建客户端
      */
     static fromCredentials(credentials, region) {
+        if (credentials.bearerToken) {
+            return new BedrockClient({
+                bearerToken: credentials.bearerToken,
+                region: region || credentials.region
+            });
+        }
         return new BedrockClient({
             accessKeyId: credentials.accessKeyId,
             secretAccessKey: credentials.secretAccessKey,
@@ -350,23 +366,34 @@ export class BedrockClient {
     }
 
     /**
-     * 发送签名请求
+     * 发送请求（支持 IAM 签名和 Bearer Token 两种认证方式）
      */
     async _sendSignedRequest(url, body, stream = false) {
         const bodyStr = JSON.stringify(body);
+        let headers;
 
-        const signedHeaders = this.signer.sign({
-            method: 'POST',
-            url,
-            headers: {
+        if (this.authType === 'bearer') {
+            // Bearer Token 认证
+            headers = {
                 'Content-Type': 'application/json',
-                'Accept': stream ? 'application/vnd.amazon.eventstream' : 'application/json'
-            },
-            body: bodyStr
-        });
+                'Accept': stream ? 'application/vnd.amazon.eventstream' : 'application/json',
+                'Authorization': `Bearer ${this.bearerToken}`
+            };
+        } else {
+            // IAM 签名认证
+            headers = this.signer.sign({
+                method: 'POST',
+                url,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': stream ? 'application/vnd.amazon.eventstream' : 'application/json'
+                },
+                body: bodyStr
+            });
+        }
 
         const config = {
-            headers: signedHeaders,
+            headers,
             ...getAxiosProxyConfig()
         };
 
@@ -410,18 +437,52 @@ export class BedrockClient {
         log.info(`Bedrock 流式请求: ${url}`);
         log.debug(`请求数据: ${JSON.stringify(requestData).substring(0, 500)}...`);
 
-        const response = await this._sendSignedRequest(url, requestData, true);
+        let response;
+        try {
+            response = await this._sendSignedRequest(url, requestData, true);
+        } catch (error) {
+            log.error(`Bedrock 流式响应错误: ${error.message}`);
+            if (error.response) {
+                log.error(`响应状态: ${error.response.status}`);
+                // 尝试读取错误响应体
+                try {
+                    if (error.response.data && typeof error.response.data.on === 'function') {
+                        // 流式响应，需要读取
+                        const chunks = [];
+                        for await (const chunk of error.response.data) {
+                            chunks.push(chunk);
+                        }
+                        const errorBody = Buffer.concat(chunks).toString('utf8');
+                        log.error(`响应数据: ${errorBody}`);
+                    } else if (error.response.data) {
+                        log.error(`响应数据: ${JSON.stringify(error.response.data)}`);
+                    }
+                } catch (e) {
+                    log.error(`无法读取响应数据: ${e.message}`);
+                }
+            }
+            throw error;
+        }
 
+        console.log(`[Bedrock] 流式响应开始接收`);
         let buffer = Buffer.alloc(0);
+        let chunkCount = 0;
+        let eventCount = 0;
 
         for await (const chunk of response.data) {
+            chunkCount++;
             buffer = Buffer.concat([buffer, chunk]);
+            console.log(`[Bedrock] 收到 chunk #${chunkCount}, 大小: ${chunk.length}, buffer 总大小: ${buffer.length}`);
+            // 打印前100字节的原始数据（hex 和 string）
+            console.log(`[Bedrock] chunk 原始数据 (hex): ${chunk.slice(0, 100).toString('hex')}`);
+            console.log(`[Bedrock] chunk 原始数据 (str): ${chunk.slice(0, 200).toString('utf8')}`);
 
             // 解析 AWS Event Stream 格式
             while (buffer.length >= 16) {
                 // 读取消息长度（前4字节）
                 const totalLength = buffer.readUInt32BE(0);
-                
+                console.log(`[Bedrock] totalLength: ${totalLength}, buffer.length: ${buffer.length}`);
+
                 if (buffer.length < totalLength) {
                     break; // 等待更多数据
                 }
@@ -433,10 +494,13 @@ export class BedrockClient {
                 // 解析消息
                 const event = this._parseEventStreamMessage(messageBuffer);
                 if (event) {
+                    eventCount++;
+                    console.log(`[Bedrock] 解析事件 #${eventCount}: ${JSON.stringify(event).substring(0, 200)}`);
                     yield event;
                 }
             }
         }
+        console.log(`[Bedrock] 流式响应结束, 共 ${chunkCount} chunks, ${eventCount} events`);
     }
 
     /**
@@ -462,22 +526,41 @@ export class BedrockClient {
             }
 
             const payload = buffer.slice(payloadStart, payloadEnd).toString('utf8');
-            
+
             if (!payload) {
                 return null;
             }
 
             try {
                 const parsed = JSON.parse(payload);
-                
-                // 处理不同的事件类型
+
+                // 新格式：直接 delta.text
+                if (parsed.delta?.text !== undefined) {
+                    return {
+                        type: 'content_block_delta',
+                        delta: { type: 'text_delta', text: parsed.delta.text }
+                    };
+                }
+
+                // 新格式：delta.toolUse
+                if (parsed.delta?.toolUse) {
+                    return {
+                        type: 'content_block_delta',
+                        delta: {
+                            type: 'input_json_delta',
+                            partial_json: parsed.delta.toolUse.input || ''
+                        }
+                    };
+                }
+
+                // 旧格式：contentBlockDelta.delta.text
                 if (parsed.contentBlockDelta?.delta?.text) {
                     return {
                         type: 'content_block_delta',
                         delta: { type: 'text_delta', text: parsed.contentBlockDelta.delta.text }
                     };
                 }
-                
+
                 if (parsed.contentBlockStart?.contentBlock?.toolUse) {
                     return {
                         type: 'content_block_start',
@@ -499,7 +582,19 @@ export class BedrockClient {
                         }
                     };
                 }
-                
+
+                // 新格式：usage 在顶层
+                if (parsed.usage) {
+                    return {
+                        type: 'message_delta',
+                        usage: {
+                            input_tokens: parsed.usage.inputTokens || 0,
+                            output_tokens: parsed.usage.outputTokens || 0
+                        }
+                    };
+                }
+
+                // 旧格式：metadata.usage
                 if (parsed.metadata?.usage) {
                     return {
                         type: 'message_delta',
@@ -507,6 +602,14 @@ export class BedrockClient {
                             input_tokens: parsed.metadata.usage.inputTokens || 0,
                             output_tokens: parsed.metadata.usage.outputTokens || 0
                         }
+                    };
+                }
+
+                // stopReason 在顶层
+                if (parsed.stopReason) {
+                    return {
+                        type: 'message_stop',
+                        stop_reason: parsed.stopReason
                     };
                 }
 

@@ -300,8 +300,10 @@ function navigateTo(page) {
         'ami': '/pages/ami.html',
         'warp': '/pages/warp.html',
         'vertex': '/pages/vertex.html',
+        'bedrock': '/pages/bedrock.html',
         'codex': '/pages/codex.html',
         'flow-tokens': '/pages/flow-tokens.html',
+        'full-accounts': '/pages/full-accounts.html',
         'chat': '/pages/chat.html',
         'error-accounts': '/pages/error-accounts.html',
         'api-keys': '/pages/api-keys.html',
@@ -375,6 +377,15 @@ function getSidebarHTML(stats = { total: 0, active: 0, error: 0 }) {
                         Vertex AI
                         <span class="nav-badge" id="nav-vertex-count">${stats.vertex || 0}</span>
                     </a>
+                    <a href="#" class="nav-item nav-subitem" data-page="bedrock">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/>
+                            <polyline points="3.27 6.96 12 12.01 20.73 6.96"/>
+                            <line x1="12" y1="22.08" x2="12" y2="12"/>
+                        </svg>
+                        Bedrock
+                        <span class="nav-badge" id="nav-bedrock-count">${stats.bedrock || 0}</span>
+                    </a>
                     <a href="#" class="nav-item nav-subitem" data-page="codex">
                         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <path d="M12 2L2 7l10 5 10-5-10-5z"/>
@@ -439,6 +450,15 @@ function getSidebarHTML(stats = { total: 0, active: 0, error: 0 }) {
                         </svg>
                         Flow Token
                         <span class="nav-badge" id="nav-flow-count">${stats.flow || 0}</span>
+                    </a>
+                    <a href="#" class="nav-item nav-subitem" data-page="full-accounts">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 2L2 7l10 5 10-5-10-5z"/>
+                            <path d="M2 17l10 5 10-5"/>
+                            <path d="M2 12l10 5 10-5"/>
+                        </svg>
+                        满血号池
+                        <span class="nav-badge" id="nav-full-count">${stats.full || 0}</span>
                     </a>
                 </div>
             </div>
@@ -573,12 +593,13 @@ function getSidebarHTML(stats = { total: 0, active: 0, error: 0 }) {
 // ============ 更新侧边栏统计 ============
 async function updateSidebarStats() {
     try {
-        const [credRes, errorRes, geminiRes, warpRes, vertexRes, amiRes, codexRes, flowRes] = await Promise.all([
+        const [credRes, errorRes, geminiRes, warpRes, vertexRes, bedrockRes, amiRes, codexRes, flowRes] = await Promise.all([
             fetch('/api/credentials', { headers: { 'Authorization': `Bearer ${authToken}` } }),
             fetch('/api/error-credentials', { headers: { 'Authorization': `Bearer ${authToken}` } }),
             fetch('/api/gemini/credentials', { headers: { 'Authorization': `Bearer ${authToken}` } }),
             fetch('/api/warp/statistics', { headers: { 'Authorization': `Bearer ${authToken}` } }),
             fetch('/api/vertex/statistics', { headers: { 'Authorization': `Bearer ${authToken}` } }),
+            fetch('/api/bedrock/statistics', { headers: { 'Authorization': `Bearer ${authToken}` } }),
             fetch('/api/ami/statistics', { headers: { 'Authorization': `Bearer ${authToken}` } }),
             fetch('/api/codex/statistics', { headers: { 'Authorization': `Bearer ${authToken}` } }),
             fetch('/api/flow/tokens', { headers: { 'Authorization': `Bearer ${authToken}` } })
@@ -589,6 +610,7 @@ async function updateSidebarStats() {
         const geminiResult = await geminiRes.json();
         const warpResult = await warpRes.json();
         const vertexResult = await vertexRes.json();
+        const bedrockResult = await bedrockRes.json();
         const amiResult = await amiRes.json();
         const codexResult = await codexRes.json();
         const flowResult = await flowRes.json();
@@ -598,6 +620,7 @@ async function updateSidebarStats() {
         const geminiCredentials = geminiResult.success ? geminiResult.data : [];
         const warpStats = warpResult.success ? warpResult.data : { total: 0 };
         const vertexStats = vertexResult || { total: 0 };
+        const bedrockStats = bedrockResult.success ? bedrockResult.data : { total: 0 };
         const amiStats = amiResult.success ? amiResult.data : { total: 0 };
         const codexStats = codexResult.success ? codexResult.data : { total: 0 };
         const flowTokens = flowResult.success ? flowResult.data : [];
@@ -608,6 +631,7 @@ async function updateSidebarStats() {
         const geminiCount = geminiCredentials.length;
         const warpCount = warpStats.total || 0;
         const vertexCount = vertexStats.total || 0;
+        const bedrockCount = bedrockStats.total || 0;
         const amiCount = amiStats.total || 0;
         const codexCount = codexStats.total || 0;
         const flowCount = flowTokens.length;
@@ -620,6 +644,7 @@ async function updateSidebarStats() {
         const navGeminiEl = document.getElementById('nav-gemini-count');
         const navWarpEl = document.getElementById('nav-warp-count');
         const navVertexEl = document.getElementById('nav-vertex-count');
+        const navBedrockEl = document.getElementById('nav-bedrock-count');
         const navAmiEl = document.getElementById('nav-ami-count');
         const navCodexEl = document.getElementById('nav-codex-count');
         const navFlowEl = document.getElementById('nav-flow-count');
@@ -631,14 +656,15 @@ async function updateSidebarStats() {
         if (navGeminiEl) navGeminiEl.textContent = geminiCount;
         if (navWarpEl) navWarpEl.textContent = warpCount;
         if (navVertexEl) navVertexEl.textContent = vertexCount;
+        if (navBedrockEl) navBedrockEl.textContent = bedrockCount;
         if (navAmiEl) navAmiEl.textContent = amiCount;
         if (navCodexEl) navCodexEl.textContent = codexCount;
         if (navFlowEl) navFlowEl.textContent = flowCount;
 
-        return { total, active, error: errorCount, gemini: geminiCount, warp: warpCount, vertex: vertexCount, ami: amiCount, codex: codexCount, flow: flowCount };
+        return { total, active, error: errorCount, gemini: geminiCount, warp: warpCount, vertex: vertexCount, bedrock: bedrockCount, ami: amiCount, codex: codexCount, flow: flowCount };
     } catch (e) {
         console.error('Update sidebar stats error:', e);
-        return { total: 0, active: 0, error: 0, gemini: 0, warp: 0, vertex: 0, ami: 0, codex: 0, flow: 0 };
+        return { total: 0, active: 0, error: 0, gemini: 0, warp: 0, vertex: 0, bedrock: 0, ami: 0, codex: 0, flow: 0 };
     }
 }
 

@@ -560,14 +560,18 @@ function generateTableUsageHTML(usage) {
         usagePercent = totalCount > 0 ? Math.round((usedCount / totalCount) * 100) : 0;
     }
 
+    const remaining = totalCount - usedCount;
     const usageClass = usagePercent > 80 ? 'danger' : usagePercent > 50 ? 'warning' : 'success';
     const colorVar = usageClass === 'danger' ? 'var(--accent-danger)' : usageClass === 'warning' ? 'var(--accent-warning)' : 'var(--accent-success)';
 
-    return '<div style="display: flex; align-items: center; gap: 8px;">' +
+    return '<div style="display: flex; flex-direction: column; gap: 4px;">' +
+        '<div style="display: flex; align-items: center; gap: 8px;">' +
         '<div style="flex: 1; height: 6px; background: var(--bg-tertiary); border-radius: 3px; min-width: 60px;">' +
         '<div style="height: 100%; width: ' + Math.min(usagePercent, 100) + '%; background: ' + colorVar + '; border-radius: 3px;"></div>' +
         '</div>' +
         '<span style="color: ' + colorVar + '; font-weight: 500; font-size: 12px; min-width: 36px;">' + usagePercent + '%</span>' +
+        '</div>' +
+        '<div style="font-size: 11px; color: var(--text-muted);">剩余 ' + remaining.toFixed(1) + ' / ' + totalCount + '</div>' +
         '</div>';
 }
 

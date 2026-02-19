@@ -428,9 +428,11 @@ export async function initDatabase() {
         CREATE TABLE IF NOT EXISTS bedrock_credentials (
             id INT PRIMARY KEY AUTO_INCREMENT,
             name VARCHAR(255) NOT NULL UNIQUE,
-            access_key_id VARCHAR(255) NOT NULL,
-            secret_access_key TEXT NOT NULL,
+            auth_type VARCHAR(20) DEFAULT 'iam',
+            access_key_id VARCHAR(255),
+            secret_access_key TEXT,
             session_token TEXT,
+            bearer_token TEXT,
             region VARCHAR(50) DEFAULT 'us-east-1',
             is_active TINYINT DEFAULT 1,
             use_count INT DEFAULT 0,
@@ -442,6 +444,30 @@ export async function initDatabase() {
             updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
+
+    // 迁移: 为 bedrock_credentials 表添加新字段（如果不存在）
+    try {
+        await pool.execute(`ALTER TABLE bedrock_credentials ADD COLUMN auth_type VARCHAR(20) DEFAULT 'iam' AFTER name`);
+    } catch (e) { /* 列已存在 */ }
+    try {
+        await pool.execute(`ALTER TABLE bedrock_credentials ADD COLUMN bearer_token TEXT AFTER session_token`);
+    } catch (e) { /* 列已存在 */ }
+    try {
+        await pool.execute(`ALTER TABLE bedrock_credentials MODIFY COLUMN access_key_id VARCHAR(255) NULL`);
+    } catch (e) { /* 忽略 */ }
+    try {
+        await pool.execute(`ALTER TABLE bedrock_credentials MODIFY COLUMN secret_access_key TEXT NULL`);
+    } catch (e) { /* 忽略 */ }
+    // 迁移: 为 bedrock_credentials 表添加 token 统计字段
+    try {
+        await pool.execute(`ALTER TABLE bedrock_credentials ADD COLUMN input_tokens BIGINT DEFAULT 0 AFTER use_count`);
+    } catch (e) { /* 列已存在 */ }
+    try {
+        await pool.execute(`ALTER TABLE bedrock_credentials ADD COLUMN output_tokens BIGINT DEFAULT 0 AFTER input_tokens`);
+    } catch (e) { /* 列已存在 */ }
+    try {
+        await pool.execute(`ALTER TABLE bedrock_credentials ADD COLUMN total_cost DECIMAL(20, 8) DEFAULT 0 AFTER output_tokens`);
+    } catch (e) { /* 列已存在 */ }
 
     // 创建 AMI 凭证表
     await pool.execute(`
@@ -524,6 +550,41 @@ export async function initDatabase() {
             INDEX idx_tool_name (tool_name),
             INDEX idx_log_level (log_level),
             INDEX idx_credential_id (credential_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    // 创建满血号池表
+    await pool.execute(`
+        CREATE TABLE IF NOT EXISTS full_accounts (
+            id INT PRIMARY KEY AUTO_INCREMENT,
+            name VARCHAR(255) NOT NULL,
+            type ENUM('digitalocean', 'aws', 'gcp', 'azure', 'other') NOT NULL,
+            credentials JSON NOT NULL,
+            remark TEXT,
+            is_active TINYINT DEFAULT 1,
+            models JSON,
+            last_tested_at DATETIME,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            INDEX idx_type (type),
+            INDEX idx_is_active (is_active)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    // 创建模型映射表
+    await pool.execute(`
+        CREATE TABLE IF NOT EXISTS model_mappings (
+            id INT PRIMARY KEY AUTO_INCREMENT,
+            source_model VARCHAR(255) NOT NULL COMMENT '请求的模型名称，如 claude-opus-4.5',
+            target_model VARCHAR(255) NOT NULL COMMENT '实际调用的模型ID',
+            provider VARCHAR(50) DEFAULT 'digitalocean' COMMENT '提供商',
+            is_active TINYINT DEFAULT 1,
+            priority INT DEFAULT 0 COMMENT '优先级，数字越大优先级越高',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            UNIQUE KEY uk_source_provider (source_model, provider),
+            INDEX idx_provider (provider),
+            INDEX idx_is_active (is_active)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
 
@@ -3619,14 +3680,17 @@ export class BedrockCredentialStore {
     }
 
     async add(credential) {
+        const authType = credential.bearerToken ? 'bearer' : 'iam';
         const [result] = await this.db.execute(`
-            INSERT INTO bedrock_credentials (name, access_key_id, secret_access_key, session_token, region, is_active)
-            VALUES (?, ?, ?, ?, ?, ?)
+            INSERT INTO bedrock_credentials (name, auth_type, access_key_id, secret_access_key, session_token, bearer_token, region, is_active)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `, [
             credential.name,
-            credential.accessKeyId,
-            credential.secretAccessKey,
+            authType,
+            credential.accessKeyId || null,
+            credential.secretAccessKey || null,
             credential.sessionToken || null,
+            credential.bearerToken || null,
             credential.region || 'us-east-1',
             credential.isActive !== false ? 1 : 0
         ]);
@@ -3638,9 +3702,11 @@ export class BedrockCredentialStore {
         const values = [];
 
         if (credential.name !== undefined) { fields.push('name = ?'); values.push(credential.name); }
+        if (credential.authType !== undefined) { fields.push('auth_type = ?'); values.push(credential.authType); }
         if (credential.accessKeyId !== undefined) { fields.push('access_key_id = ?'); values.push(credential.accessKeyId); }
         if (credential.secretAccessKey !== undefined) { fields.push('secret_access_key = ?'); values.push(credential.secretAccessKey); }
         if (credential.sessionToken !== undefined) { fields.push('session_token = ?'); values.push(credential.sessionToken); }
+        if (credential.bearerToken !== undefined) { fields.push('bearer_token = ?'); values.push(credential.bearerToken); }
         if (credential.region !== undefined) { fields.push('region = ?'); values.push(credential.region); }
         if (credential.isActive !== undefined) { fields.push('is_active = ?'); values.push(credential.isActive ? 1 : 0); }
         if (credential.errorCount !== undefined) { fields.push('error_count = ?'); values.push(credential.errorCount); }
@@ -3728,25 +3794,50 @@ export class BedrockCredentialStore {
         const [active] = await this.db.execute('SELECT COUNT(*) as count FROM bedrock_credentials WHERE is_active = 1');
         const [healthy] = await this.db.execute('SELECT COUNT(*) as count FROM bedrock_credentials WHERE is_active = 1 AND error_count < 3');
         const [totalUse] = await this.db.execute('SELECT SUM(use_count) as total FROM bedrock_credentials');
+        const [tokenStats] = await this.db.execute(`
+            SELECT
+                COALESCE(SUM(input_tokens), 0) as totalInputTokens,
+                COALESCE(SUM(output_tokens), 0) as totalOutputTokens,
+                COALESCE(SUM(total_cost), 0) as totalCost
+            FROM bedrock_credentials
+        `);
 
         return {
             total: total[0].count,
             active: active[0].count,
             healthy: healthy[0].count,
-            totalUseCount: totalUse[0].total || 0
+            totalUseCount: totalUse[0].total || 0,
+            totalInputTokens: Number(tokenStats[0].totalInputTokens) || 0,
+            totalOutputTokens: Number(tokenStats[0].totalOutputTokens) || 0,
+            totalCost: Number(tokenStats[0].totalCost) || 0
         };
+    }
+
+    async updateTokenStats(id, inputTokens, outputTokens, cost) {
+        await this.db.execute(`
+            UPDATE bedrock_credentials SET
+                input_tokens = input_tokens + ?,
+                output_tokens = output_tokens + ?,
+                total_cost = total_cost + ?
+            WHERE id = ?
+        `, [inputTokens, outputTokens, cost, id]);
     }
 
     _mapRow(row) {
         return {
             id: row.id,
             name: row.name,
+            authType: row.auth_type || 'iam',
             accessKeyId: row.access_key_id,
             secretAccessKey: row.secret_access_key,
             sessionToken: row.session_token,
+            bearerToken: row.bearer_token,
             region: row.region || 'us-east-1',
             isActive: row.is_active === 1,
             useCount: row.use_count || 0,
+            inputTokens: Number(row.input_tokens) || 0,
+            outputTokens: Number(row.output_tokens) || 0,
+            totalCost: Number(row.total_cost) || 0,
             lastUsedAt: row.last_used_at,
             errorCount: row.error_count || 0,
             lastErrorAt: row.last_error_at,
@@ -4345,6 +4436,221 @@ export class CodexCredentialStore {
             usageResetAt: row.usage_reset_at,
             planType: row.plan_type,
             usageUpdatedAt: row.usage_updated_at,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at
+        };
+    }
+}
+
+/**
+ * 满血号池管理类
+ */
+export class FullAccountStore {
+    constructor(database) {
+        this.db = database;
+    }
+
+    static async create() {
+        const database = await getDatabase();
+        return new FullAccountStore(database);
+    }
+
+    async add(account) {
+        const [result] = await this.db.execute(`
+            INSERT INTO full_accounts (name, type, credentials, remark, is_active)
+            VALUES (?, ?, ?, ?, ?)
+        `, [
+            account.name,
+            account.type,
+            JSON.stringify(account.credentials),
+            account.remark || null,
+            account.isActive !== false ? 1 : 0
+        ]);
+        return result.insertId;
+    }
+
+    async update(id, account) {
+        const fields = [];
+        const values = [];
+
+        if (account.name !== undefined) { fields.push('name = ?'); values.push(account.name); }
+        if (account.type !== undefined) { fields.push('type = ?'); values.push(account.type); }
+        if (account.credentials !== undefined) { fields.push('credentials = ?'); values.push(JSON.stringify(account.credentials)); }
+        if (account.remark !== undefined) { fields.push('remark = ?'); values.push(account.remark); }
+        if (account.isActive !== undefined) { fields.push('is_active = ?'); values.push(account.isActive ? 1 : 0); }
+        if (account.models !== undefined) { fields.push('models = ?'); values.push(JSON.stringify(account.models)); }
+        if (account.lastTestedAt !== undefined) { fields.push('last_tested_at = ?'); values.push(account.lastTestedAt); }
+
+        if (fields.length === 0) return;
+
+        values.push(id);
+        await this.db.execute(`UPDATE full_accounts SET ${fields.join(', ')} WHERE id = ?`, values);
+    }
+
+    async delete(id) {
+        await this.db.execute('DELETE FROM full_accounts WHERE id = ?', [id]);
+    }
+
+    async getById(id) {
+        const [rows] = await this.db.execute('SELECT * FROM full_accounts WHERE id = ?', [id]);
+        if (rows.length === 0) return null;
+        return this._mapRow(rows[0]);
+    }
+
+    async getAll() {
+        const [rows] = await this.db.execute('SELECT * FROM full_accounts ORDER BY created_at DESC');
+        return rows.map(row => this._mapRow(row));
+    }
+
+    async getAllActive() {
+        const [rows] = await this.db.execute('SELECT * FROM full_accounts WHERE is_active = 1 ORDER BY created_at DESC');
+        return rows.map(row => this._mapRow(row));
+    }
+
+    async getByType(type) {
+        const [rows] = await this.db.execute('SELECT * FROM full_accounts WHERE type = ? ORDER BY created_at DESC', [type]);
+        return rows.map(row => this._mapRow(row));
+    }
+
+    async toggleActive(id) {
+        await this.db.execute('UPDATE full_accounts SET is_active = NOT is_active WHERE id = ?', [id]);
+    }
+
+    async batchDelete(ids) {
+        if (!ids || ids.length === 0) return 0;
+        const placeholders = ids.map(() => '?').join(',');
+        const [result] = await this.db.execute(`DELETE FROM full_accounts WHERE id IN (${placeholders})`, ids);
+        return result.affectedRows;
+    }
+
+    async getStatistics() {
+        const [total] = await this.db.execute('SELECT COUNT(*) as count FROM full_accounts');
+        const [byType] = await this.db.execute('SELECT type, COUNT(*) as count FROM full_accounts GROUP BY type');
+
+        const stats = { total: total[0].count, digitalocean: 0, aws: 0, gcp: 0, azure: 0, other: 0 };
+        byType.forEach(row => { stats[row.type] = row.count; });
+        return stats;
+    }
+
+    _mapRow(row) {
+        let credentials = {};
+        try {
+            credentials = typeof row.credentials === 'string' ? JSON.parse(row.credentials) : row.credentials;
+        } catch (e) { credentials = {}; }
+
+        let models = [];
+        try {
+            models = row.models ? (typeof row.models === 'string' ? JSON.parse(row.models) : row.models) : [];
+        } catch (e) { models = []; }
+
+        return {
+            id: row.id,
+            name: row.name,
+            type: row.type,
+            credentials,
+            remark: row.remark,
+            isActive: row.is_active === 1,
+            models,
+            lastTestedAt: row.last_tested_at,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at
+        };
+    }
+}
+
+// 模型映射存储
+export class ModelMappingStore {
+    constructor(database) {
+        this.db = database;
+    }
+
+    static async create() {
+        const database = await getDatabase();
+        return new ModelMappingStore(database);
+    }
+
+    async add(mapping) {
+        const [result] = await this.db.execute(`
+            INSERT INTO model_mappings (source_model, target_model, provider, is_active, priority)
+            VALUES (?, ?, ?, ?, ?)
+            ON DUPLICATE KEY UPDATE target_model = VALUES(target_model), is_active = VALUES(is_active), priority = VALUES(priority)
+        `, [
+            mapping.sourceModel,
+            mapping.targetModel,
+            mapping.provider || 'digitalocean',
+            mapping.isActive !== false ? 1 : 0,
+            mapping.priority || 0
+        ]);
+        return result.insertId;
+    }
+
+    async update(id, mapping) {
+        const fields = [];
+        const values = [];
+
+        if (mapping.sourceModel !== undefined) { fields.push('source_model = ?'); values.push(mapping.sourceModel); }
+        if (mapping.targetModel !== undefined) { fields.push('target_model = ?'); values.push(mapping.targetModel); }
+        if (mapping.provider !== undefined) { fields.push('provider = ?'); values.push(mapping.provider); }
+        if (mapping.isActive !== undefined) { fields.push('is_active = ?'); values.push(mapping.isActive ? 1 : 0); }
+        if (mapping.priority !== undefined) { fields.push('priority = ?'); values.push(mapping.priority); }
+
+        if (fields.length === 0) return;
+
+        values.push(id);
+        await this.db.execute(`UPDATE model_mappings SET ${fields.join(', ')} WHERE id = ?`, values);
+    }
+
+    async delete(id) {
+        await this.db.execute('DELETE FROM model_mappings WHERE id = ?', [id]);
+    }
+
+    async getById(id) {
+        const [rows] = await this.db.execute('SELECT * FROM model_mappings WHERE id = ?', [id]);
+        if (rows.length === 0) return null;
+        return this._mapRow(rows[0]);
+    }
+
+    async getAll() {
+        const [rows] = await this.db.execute('SELECT * FROM model_mappings ORDER BY priority DESC, source_model ASC');
+        return rows.map(row => this._mapRow(row));
+    }
+
+    async getByProvider(provider) {
+        const [rows] = await this.db.execute('SELECT * FROM model_mappings WHERE provider = ? ORDER BY priority DESC', [provider]);
+        return rows.map(row => this._mapRow(row));
+    }
+
+    async getActiveByProvider(provider) {
+        const [rows] = await this.db.execute('SELECT * FROM model_mappings WHERE provider = ? AND is_active = 1 ORDER BY priority DESC', [provider]);
+        return rows.map(row => this._mapRow(row));
+    }
+
+    // 根据源模型名称查找目标模型
+    async findTargetModel(sourceModel, provider = 'digitalocean') {
+        const [rows] = await this.db.execute(`
+            SELECT target_model FROM model_mappings
+            WHERE source_model = ? AND provider = ? AND is_active = 1
+            ORDER BY priority DESC LIMIT 1
+        `, [sourceModel, provider]);
+        return rows.length > 0 ? rows[0].target_model : null;
+    }
+
+    // 批量添加/更新映射
+    async batchUpsert(mappings) {
+        for (const mapping of mappings) {
+            await this.add(mapping);
+        }
+        return mappings.length;
+    }
+
+    _mapRow(row) {
+        return {
+            id: row.id,
+            sourceModel: row.source_model,
+            targetModel: row.target_model,
+            provider: row.provider,
+            isActive: row.is_active === 1,
+            priority: row.priority,
             createdAt: row.created_at,
             updatedAt: row.updated_at
         };

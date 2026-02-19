@@ -4,7 +4,7 @@
 import express from 'express';
 import { BedrockCredentialStore } from '../db.js';
 import { BedrockClient, BedrockAPI } from './bedrock.js';
-import { BEDROCK_CONSTANTS, BEDROCK_MODELS, BEDROCK_MODEL_MAPPING } from '../constants.js';
+import { BEDROCK_CONSTANTS, BEDROCK_MODELS, BEDROCK_MODEL_MAPPING, calculateTokenCost } from '../constants.js';
 import { logger } from '../logger.js';
 
 const log = logger.api;
@@ -19,15 +19,16 @@ router.get('/credentials', async (req, res) => {
     try {
         const store = await BedrockCredentialStore.create();
         const credentials = await store.getAll();
-        
+
         // 隐藏敏感信息
         const safeCredentials = credentials.map(cred => ({
             ...cred,
             accessKeyId: cred.accessKeyId ? cred.accessKeyId.substring(0, 8) + '****' : null,
-            secretAccessKey: '********',
-            sessionToken: cred.sessionToken ? '****' : null
+            secretAccessKey: cred.secretAccessKey ? '********' : null,
+            sessionToken: cred.sessionToken ? '****' : null,
+            bearerToken: cred.bearerToken ? cred.bearerToken.substring(0, 10) + '****' : null
         }));
-        
+
         res.json({ success: true, data: safeCredentials });
     } catch (error) {
         log.error(`获取 Bedrock 凭据列表失败: ${error.message}`);
@@ -42,19 +43,20 @@ router.get('/credentials/:id', async (req, res) => {
     try {
         const store = await BedrockCredentialStore.create();
         const credential = await store.getById(parseInt(req.params.id));
-        
+
         if (!credential) {
             return res.status(404).json({ success: false, error: '凭据不存在' });
         }
-        
+
         // 隐藏敏感信息
         const safeCredential = {
             ...credential,
             accessKeyId: credential.accessKeyId ? credential.accessKeyId.substring(0, 8) + '****' : null,
-            secretAccessKey: '********',
-            sessionToken: credential.sessionToken ? '****' : null
+            secretAccessKey: credential.secretAccessKey ? '********' : null,
+            sessionToken: credential.sessionToken ? '****' : null,
+            bearerToken: credential.bearerToken ? credential.bearerToken.substring(0, 10) + '****' : null
         };
-        
+
         res.json({ success: true, data: safeCredential });
     } catch (error) {
         log.error(`获取 Bedrock 凭据失败: ${error.message}`);
@@ -67,29 +69,35 @@ router.get('/credentials/:id', async (req, res) => {
  */
 router.post('/credentials', async (req, res) => {
     try {
-        const { name, accessKeyId, secretAccessKey, sessionToken, region } = req.body;
-        
-        if (!name || !accessKeyId || !secretAccessKey) {
-            return res.status(400).json({ success: false, error: '缺少必要参数: name, accessKeyId, secretAccessKey' });
+        const { name, accessKeyId, secretAccessKey, sessionToken, bearerToken, region } = req.body;
+
+        // 验证：需要 Bearer Token 或 IAM 凭证
+        if (!name) {
+            return res.status(400).json({ success: false, error: '缺少必要参数: name' });
         }
-        
+
+        if (!bearerToken && (!accessKeyId || !secretAccessKey)) {
+            return res.status(400).json({ success: false, error: '需要提供 bearerToken 或 (accessKeyId + secretAccessKey)' });
+        }
+
         const store = await BedrockCredentialStore.create();
-        
+
         // 检查名称是否已存在
         const existing = await store.getByName(name);
         if (existing) {
             return res.status(400).json({ success: false, error: `名称 "${name}" 已存在` });
         }
-        
+
         const id = await store.add({
             name,
             accessKeyId,
             secretAccessKey,
             sessionToken,
+            bearerToken,
             region: region || BEDROCK_CONSTANTS.DEFAULT_REGION
         });
-        
-        log.info(`添加 Bedrock 凭据成功: ${name} (ID: ${id})`);
+
+        log.info(`添加 Bedrock 凭据成功: ${name} (ID: ${id}, 认证方式: ${bearerToken ? 'Bearer Token' : 'IAM'})`);
         res.json({ success: true, data: { id, name } });
     } catch (error) {
         log.error(`添加 Bedrock 凭据失败: ${error.message}`);
@@ -104,22 +112,23 @@ router.put('/credentials/:id', async (req, res) => {
     try {
         const id = parseInt(req.params.id);
         const store = await BedrockCredentialStore.create();
-        
+
         const existing = await store.getById(id);
         if (!existing) {
             return res.status(404).json({ success: false, error: '凭据不存在' });
         }
-        
+
         const updates = {};
         if (req.body.name !== undefined) updates.name = req.body.name;
         if (req.body.accessKeyId !== undefined) updates.accessKeyId = req.body.accessKeyId;
         if (req.body.secretAccessKey !== undefined) updates.secretAccessKey = req.body.secretAccessKey;
         if (req.body.sessionToken !== undefined) updates.sessionToken = req.body.sessionToken;
+        if (req.body.bearerToken !== undefined) updates.bearerToken = req.body.bearerToken;
         if (req.body.region !== undefined) updates.region = req.body.region;
         if (req.body.isActive !== undefined) updates.isActive = req.body.isActive;
-        
+
         await store.update(id, updates);
-        
+
         log.info(`更新 Bedrock 凭据成功: ID ${id}`);
         res.json({ success: true });
     } catch (error) {
@@ -302,16 +311,23 @@ router.post('/chat/:id', async (req, res) => {
         }
         
         const client = BedrockClient.fromCredentials(credential);
-        const response = await client.chat(messages, model || BEDROCK_CONSTANTS.DEFAULT_MODEL, {
+        const modelToUse = model || BEDROCK_CONSTANTS.DEFAULT_MODEL;
+        const response = await client.chat(messages, modelToUse, {
             system,
             max_tokens,
             temperature,
             tools
         });
-        
-        // 更新使用计数
+
+        // 更新使用计数和 token 统计
         await store.incrementUseCount(id);
-        
+        if (response.usage) {
+            const inputTokens = response.usage.input_tokens || 0;
+            const outputTokens = response.usage.output_tokens || 0;
+            const { totalCost } = calculateTokenCost(modelToUse, inputTokens, outputTokens);
+            await store.updateTokenStats(id, inputTokens, outputTokens, totalCost);
+        }
+
         res.json(response);
     } catch (error) {
         log.error(`Bedrock 聊天失败: ${error.message}`);
@@ -326,47 +342,59 @@ router.post('/chat/:id/stream', async (req, res) => {
     try {
         const id = parseInt(req.params.id);
         const { messages, model, system, max_tokens, temperature, tools } = req.body;
-        
+
         if (!messages || !Array.isArray(messages)) {
             return res.status(400).json({ success: false, error: '缺少 messages 参数' });
         }
-        
+
         const store = await BedrockCredentialStore.create();
         const credential = await store.getById(id);
-        
+
         if (!credential) {
             return res.status(404).json({ success: false, error: '凭据不存在' });
         }
-        
+
         if (!credential.isActive) {
             return res.status(400).json({ success: false, error: '凭据已停用' });
         }
-        
+
         // 设置 SSE 响应头
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
         res.flushHeaders();
-        
+
         const client = BedrockClient.fromCredentials(credential);
-        
-        for await (const event of client.chatStream(messages, model || BEDROCK_CONSTANTS.DEFAULT_MODEL, {
+        const modelToUse = model || BEDROCK_CONSTANTS.DEFAULT_MODEL;
+        let inputTokens = 0;
+        let outputTokens = 0;
+
+        for await (const event of client.chatStream(messages, modelToUse, {
             system,
             max_tokens,
             temperature,
             tools
         })) {
             res.write(`data: ${JSON.stringify(event)}\n\n`);
+            // 捕获 token 统计
+            if (event.type === 'message_delta' && event.usage) {
+                inputTokens = event.usage.input_tokens || inputTokens;
+                outputTokens = event.usage.output_tokens || outputTokens;
+            }
         }
-        
-        // 更新使用计数
+
+        // 更新使用计数和 token 统计
         await store.incrementUseCount(id);
-        
+        if (inputTokens > 0 || outputTokens > 0) {
+            const { totalCost } = calculateTokenCost(modelToUse, inputTokens, outputTokens);
+            await store.updateTokenStats(id, inputTokens, outputTokens, totalCost);
+        }
+
         res.write('data: [DONE]\n\n');
         res.end();
     } catch (error) {
         log.error(`Bedrock 流式聊天失败: ${error.message}`);
-        
+
         if (!res.headersSent) {
             res.status(500).json({ success: false, error: error.message });
         } else {
@@ -382,29 +410,36 @@ router.post('/chat/:id/stream', async (req, res) => {
 router.post('/chat', async (req, res) => {
     try {
         const { messages, model, system, max_tokens, temperature, tools } = req.body;
-        
+
         if (!messages || !Array.isArray(messages)) {
             return res.status(400).json({ success: false, error: '缺少 messages 参数' });
         }
-        
+
         const store = await BedrockCredentialStore.create();
         const credential = await store.getRandomActive();
-        
+
         if (!credential) {
             return res.status(400).json({ success: false, error: '没有可用的 Bedrock 凭据' });
         }
-        
+
         const client = BedrockClient.fromCredentials(credential);
-        const response = await client.chat(messages, model || BEDROCK_CONSTANTS.DEFAULT_MODEL, {
+        const modelToUse = model || BEDROCK_CONSTANTS.DEFAULT_MODEL;
+        const response = await client.chat(messages, modelToUse, {
             system,
             max_tokens,
             temperature,
             tools
         });
-        
-        // 更新使用计数
+
+        // 更新使用计数和 token 统计
         await store.incrementUseCount(credential.id);
-        
+        if (response.usage) {
+            const inputTokens = response.usage.input_tokens || 0;
+            const outputTokens = response.usage.output_tokens || 0;
+            const { totalCost } = calculateTokenCost(modelToUse, inputTokens, outputTokens);
+            await store.updateTokenStats(credential.id, inputTokens, outputTokens, totalCost);
+        }
+
         res.json(response);
     } catch (error) {
         log.error(`Bedrock 聊天失败: ${error.message}`);
@@ -418,48 +453,237 @@ router.post('/chat', async (req, res) => {
 router.post('/chat/stream', async (req, res) => {
     try {
         const { messages, model, system, max_tokens, temperature, tools } = req.body;
-        
+
         if (!messages || !Array.isArray(messages)) {
             return res.status(400).json({ success: false, error: '缺少 messages 参数' });
         }
-        
+
         const store = await BedrockCredentialStore.create();
         const credential = await store.getRandomActive();
-        
+
         if (!credential) {
             return res.status(400).json({ success: false, error: '没有可用的 Bedrock 凭据' });
         }
-        
+
         // 设置 SSE 响应头
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
         res.flushHeaders();
-        
+
         const client = BedrockClient.fromCredentials(credential);
-        
-        for await (const event of client.chatStream(messages, model || BEDROCK_CONSTANTS.DEFAULT_MODEL, {
+        const modelToUse = model || BEDROCK_CONSTANTS.DEFAULT_MODEL;
+        let inputTokens = 0;
+        let outputTokens = 0;
+
+        for await (const event of client.chatStream(messages, modelToUse, {
             system,
             max_tokens,
             temperature,
             tools
         })) {
             res.write(`data: ${JSON.stringify(event)}\n\n`);
+            // 捕获 token 统计
+            if (event.type === 'message_delta' && event.usage) {
+                inputTokens = event.usage.input_tokens || inputTokens;
+                outputTokens = event.usage.output_tokens || outputTokens;
+            }
         }
-        
-        // 更新使用计数
+
+        // 更新使用计数和 token 统计
         await store.incrementUseCount(credential.id);
-        
+        if (inputTokens > 0 || outputTokens > 0) {
+            const { totalCost } = calculateTokenCost(modelToUse, inputTokens, outputTokens);
+            await store.updateTokenStats(credential.id, inputTokens, outputTokens, totalCost);
+        }
+
         res.write('data: [DONE]\n\n');
         res.end();
     } catch (error) {
         log.error(`Bedrock 流式聊天失败: ${error.message}`);
-        
+
         if (!res.headersSent) {
             res.status(500).json({ success: false, error: error.message });
         } else {
             res.write(`data: ${JSON.stringify({ error: error.message })}\n\n`);
             res.end();
+        }
+    }
+});
+
+// ==================== Claude API 兼容端点 (/v1/messages) ====================
+
+/**
+ * Claude API 兼容端点 - /v1/messages
+ * 支持流式和非流式响应
+ */
+router.post('/v1/messages', async (req, res) => {
+    try {
+        const { messages, model, system, max_tokens, temperature, top_p, stop_sequences, tools, stream } = req.body;
+
+        if (!messages || !Array.isArray(messages)) {
+            return res.status(400).json({
+                type: 'error',
+                error: {
+                    type: 'invalid_request_error',
+                    message: 'messages is required and must be an array'
+                }
+            });
+        }
+
+        const store = await BedrockCredentialStore.create();
+        const credential = await store.getRandomActive();
+
+        if (!credential) {
+            return res.status(503).json({
+                type: 'error',
+                error: {
+                    type: 'api_error',
+                    message: 'No available Bedrock credentials'
+                }
+            });
+        }
+
+        const client = BedrockClient.fromCredentials(credential);
+        const modelToUse = model || BEDROCK_CONSTANTS.DEFAULT_MODEL;
+        const options = {
+            system,
+            max_tokens: max_tokens || 4096,
+            temperature,
+            top_p,
+            stop_sequences,
+            tools
+        };
+
+        if (stream) {
+            // 流式响应
+            res.setHeader('Content-Type', 'text/event-stream');
+            res.setHeader('Cache-Control', 'no-cache');
+            res.setHeader('Connection', 'keep-alive');
+            res.setHeader('X-Accel-Buffering', 'no');
+            res.flushHeaders();
+
+            const messageId = 'msg_' + Date.now() + Math.random().toString(36).substring(2, 8);
+            let inputTokens = 0;
+            let outputTokens = 0;
+            let contentBlockIndex = 0;
+
+            // 发送 message_start 事件
+            res.write(`event: message_start\ndata: ${JSON.stringify({
+                type: 'message_start',
+                message: {
+                    id: messageId,
+                    type: 'message',
+                    role: 'assistant',
+                    content: [],
+                    model: modelToUse,
+                    stop_reason: null,
+                    stop_sequence: null,
+                    usage: { input_tokens: 0, output_tokens: 0 }
+                }
+            })}\n\n`);
+
+            // 发送 content_block_start 事件
+            res.write(`event: content_block_start\ndata: ${JSON.stringify({
+                type: 'content_block_start',
+                index: contentBlockIndex,
+                content_block: { type: 'text', text: '' }
+            })}\n\n`);
+
+            try {
+                for await (const event of client.chatStream(messages, modelToUse, options)) {
+                    if (event.type === 'content_block_delta' && event.delta?.text) {
+                        res.write(`event: content_block_delta\ndata: ${JSON.stringify({
+                            type: 'content_block_delta',
+                            index: contentBlockIndex,
+                            delta: { type: 'text_delta', text: event.delta.text }
+                        })}\n\n`);
+                    } else if (event.type === 'content_block_start' && event.content_block?.type === 'tool_use') {
+                        // 结束当前文本块
+                        res.write(`event: content_block_stop\ndata: ${JSON.stringify({
+                            type: 'content_block_stop',
+                            index: contentBlockIndex
+                        })}\n\n`);
+                        contentBlockIndex++;
+                        // 开始工具使用块
+                        res.write(`event: content_block_start\ndata: ${JSON.stringify({
+                            type: 'content_block_start',
+                            index: contentBlockIndex,
+                            content_block: event.content_block
+                        })}\n\n`);
+                    } else if (event.type === 'content_block_delta' && event.delta?.type === 'input_json_delta') {
+                        res.write(`event: content_block_delta\ndata: ${JSON.stringify({
+                            type: 'content_block_delta',
+                            index: contentBlockIndex,
+                            delta: event.delta
+                        })}\n\n`);
+                    } else if (event.type === 'message_delta' && event.usage) {
+                        inputTokens = event.usage.input_tokens || inputTokens;
+                        outputTokens = event.usage.output_tokens || outputTokens;
+                    }
+                }
+
+                // 发送 content_block_stop 事件
+                res.write(`event: content_block_stop\ndata: ${JSON.stringify({
+                    type: 'content_block_stop',
+                    index: contentBlockIndex
+                })}\n\n`);
+
+                // 发送 message_delta 事件
+                res.write(`event: message_delta\ndata: ${JSON.stringify({
+                    type: 'message_delta',
+                    delta: { stop_reason: 'end_turn', stop_sequence: null },
+                    usage: { output_tokens: outputTokens }
+                })}\n\n`);
+
+                // 发送 message_stop 事件
+                res.write(`event: message_stop\ndata: ${JSON.stringify({
+                    type: 'message_stop'
+                })}\n\n`);
+
+                // 更新使用计数和 token 统计
+                await store.incrementUseCount(credential.id);
+                if (inputTokens > 0 || outputTokens > 0) {
+                    const { totalCost } = calculateTokenCost(modelToUse, inputTokens, outputTokens);
+                    await store.updateTokenStats(credential.id, inputTokens, outputTokens, totalCost);
+                }
+
+            } catch (streamError) {
+                log.error(`Bedrock 流式响应错误: ${streamError.message}`);
+                res.write(`event: error\ndata: ${JSON.stringify({
+                    type: 'error',
+                    error: { type: 'api_error', message: streamError.message }
+                })}\n\n`);
+            }
+
+            res.end();
+        } else {
+            // 非流式响应
+            const response = await client.chat(messages, modelToUse, options);
+
+            // 更新使用计数和 token 统计
+            await store.incrementUseCount(credential.id);
+            if (response.usage) {
+                const inputTokens = response.usage.input_tokens || 0;
+                const outputTokens = response.usage.output_tokens || 0;
+                const { totalCost } = calculateTokenCost(modelToUse, inputTokens, outputTokens);
+                await store.updateTokenStats(credential.id, inputTokens, outputTokens, totalCost);
+            }
+
+            res.json(response);
+        }
+    } catch (error) {
+        log.error(`Bedrock /v1/messages 失败: ${error.message}`);
+
+        if (!res.headersSent) {
+            const statusCode = error.response?.status || 500;
+            res.status(statusCode).json({
+                type: 'error',
+                error: {
+                    type: 'api_error',
+                    message: error.message
+                }
+            });
         }
     }
 });

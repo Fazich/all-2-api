@@ -4,7 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import axios from 'axios';
 import crypto from 'crypto';
-import { CredentialStore, UserStore, ApiKeyStore, ApiLogStore, GeminiCredentialStore, OrchidsCredentialStore, WarpCredentialStore, TrialApplicationStore, SiteSettingsStore, VertexCredentialStore, BedrockCredentialStore, ModelPricingStore, AmiCredentialStore, PackageStore, initDatabase } from './db.js';
+import { CredentialStore, UserStore, ApiKeyStore, ApiLogStore, GeminiCredentialStore, OrchidsCredentialStore, WarpCredentialStore, TrialApplicationStore, SiteSettingsStore, VertexCredentialStore, BedrockCredentialStore, ModelPricingStore, AmiCredentialStore, PackageStore, FullAccountStore, ModelMappingStore, initDatabase } from './db.js';
 import { KiroClient } from './kiro/client.js';
 import { KiroService } from './kiro/kiro-service.js';
 import { KiroAPI } from './kiro/api.js';
@@ -38,6 +38,7 @@ import { setupCodexRoutes } from './codex/codex-routes.js';
 import { CodexCredentialStore } from './db.js';
 import { CodexService, CODEX_MODELS } from './codex/codex-service.js';
 import { createFlowRoutes } from './flow/index.js';
+import { setupDigitalOceanRoutes } from './digitalocean/do-routes.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -1306,7 +1307,418 @@ app.post('/api/packages/:id/toggle', authMiddleware, async (req, res) => {
     }
 });
 
-// ============ 试用申请 API ============
+// ============ 满血号池 API ============
+
+// 获取所有凭证
+app.get('/api/full-accounts', authMiddleware, async (req, res) => {
+    try {
+        const store = await FullAccountStore.create();
+        const accounts = await store.getAll();
+        res.json({ success: true, data: accounts });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// 获取单个凭证
+app.get('/api/full-accounts/:id', authMiddleware, async (req, res) => {
+    try {
+        const store = await FullAccountStore.create();
+        const account = await store.getById(parseInt(req.params.id));
+        if (!account) {
+            return res.status(404).json({ success: false, error: '凭证不存在' });
+        }
+        res.json({ success: true, data: account });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// 添加凭证
+app.post('/api/full-accounts', authMiddleware, async (req, res) => {
+    try {
+        const { name, type, credentials, remark } = req.body;
+        if (!name || !type || !credentials) {
+            return res.status(400).json({ success: false, error: '名称、类型和凭证信息是必填项' });
+        }
+
+        const store = await FullAccountStore.create();
+        const id = await store.add({ name, type, credentials, remark });
+        const account = await store.getById(id);
+        res.json({ success: true, data: account });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// 更新凭证
+app.put('/api/full-accounts/:id', authMiddleware, async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        const store = await FullAccountStore.create();
+
+        const existing = await store.getById(id);
+        if (!existing) {
+            return res.status(404).json({ success: false, error: '凭证不存在' });
+        }
+
+        const { name, type, credentials, remark } = req.body;
+        await store.update(id, { name, type, credentials, remark });
+        const account = await store.getById(id);
+        res.json({ success: true, data: account });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// 删除凭证
+app.delete('/api/full-accounts/:id', authMiddleware, async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        const store = await FullAccountStore.create();
+
+        const existing = await store.getById(id);
+        if (!existing) {
+            return res.status(404).json({ success: false, error: '凭证不存在' });
+        }
+
+        await store.delete(id);
+        res.json({ success: true, data: { message: '删除成功' } });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// 切换凭证状态
+app.post('/api/full-accounts/:id/toggle', authMiddleware, async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        const store = await FullAccountStore.create();
+
+        const existing = await store.getById(id);
+        if (!existing) {
+            return res.status(404).json({ success: false, error: '凭证不存在' });
+        }
+
+        await store.toggleActive(id);
+        const account = await store.getById(id);
+        res.json({ success: true, data: account });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// 批量删除凭证
+app.post('/api/full-accounts/batch-delete', authMiddleware, async (req, res) => {
+    try {
+        const { ids } = req.body;
+        if (!ids || !Array.isArray(ids) || ids.length === 0) {
+            return res.status(400).json({ success: false, error: '请提供要删除的凭证 ID 列表' });
+        }
+
+        const store = await FullAccountStore.create();
+        const deleted = await store.batchDelete(ids);
+        res.json({ success: true, data: { deleted, message: `已删除 ${deleted} 个凭证` } });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// 测试单个凭证连接
+app.post('/api/full-accounts/:id/test', authMiddleware, async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        const store = await FullAccountStore.create();
+        const account = await store.getById(id);
+
+        if (!account) {
+            return res.status(404).json({ success: false, message: '凭证不存在' });
+        }
+
+        const result = await testCredentialConnection(account);
+
+        // 更新凭证状态和模型列表
+        const updateData = {
+            isActive: result.success,
+            lastTestedAt: new Date().toISOString()
+        };
+        if (result.models) {
+            updateData.models = result.models;
+        }
+        await store.update(id, updateData);
+
+        res.json(result);
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+// 批量测试凭证
+app.post('/api/full-accounts/batch-test', authMiddleware, async (req, res) => {
+    try {
+        const { ids } = req.body;
+        if (!ids || !Array.isArray(ids) || ids.length === 0) {
+            return res.status(400).json({ success: false, message: '请提供要测试的凭证 ID 列表' });
+        }
+
+        const store = await FullAccountStore.create();
+        let passed = 0, failed = 0;
+
+        for (const id of ids) {
+            const account = await store.getById(id);
+            if (account) {
+                const result = await testCredentialConnection(account);
+                const updateData = {
+                    isActive: result.success,
+                    lastTestedAt: new Date().toISOString()
+                };
+                if (result.models) {
+                    updateData.models = result.models;
+                }
+                await store.update(id, updateData);
+                if (result.success) passed++;
+                else failed++;
+            }
+        }
+
+        res.json({ success: true, data: { passed, failed } });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+});
+
+// 测试凭证连接的辅助函数
+async function testCredentialConnection(account) {
+    const { type, credentials } = account;
+
+    try {
+        switch (type) {
+            case 'digitalocean': {
+                // DigitalOcean Gradient AI - 测试获取模型列表
+                const response = await fetch('https://inference.do-ai.run/v1/models', {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${credentials.token}`,
+                        'Content-Type': 'application/json'
+                    }
+                });
+                if (response.ok) {
+                    const data = await response.json();
+                    const models = data.data?.map(m => ({
+                        id: m.id,
+                        ownedBy: m.owned_by,
+                        created: m.created
+                    })) || [];
+                    return { success: true, message: `可用模型: ${models.length} 个`, models };
+                } else {
+                    return { success: false, message: `API 错误: ${response.status}` };
+                }
+            }
+            case 'aws': {
+                // AWS - 简单验证凭证格式
+                if (credentials.accessKey && credentials.secretKey) {
+                    return { success: true, message: '凭证格式有效' };
+                }
+                return { success: false, message: '凭证格式无效' };
+            }
+            case 'gcp': {
+                // GCP - 验证 Service Account JSON
+                if (credentials.serviceAccount && credentials.projectId) {
+                    return { success: true, message: `项目: ${credentials.projectId}` };
+                }
+                return { success: false, message: '凭证格式无效' };
+            }
+            case 'azure': {
+                // Azure - 验证凭证格式
+                if (credentials.tenantId && credentials.clientId && credentials.clientSecret) {
+                    return { success: true, message: '凭证格式有效' };
+                }
+                return { success: false, message: '凭证格式无效' };
+            }
+            case 'other': {
+                // 其他 - 尝试请求 URL
+                if (credentials.url && credentials.apiKey) {
+                    try {
+                        const response = await fetch(credentials.url, {
+                            method: 'GET',
+                            headers: { 'Authorization': `Bearer ${credentials.apiKey}` }
+                        });
+                        return { success: response.ok, message: response.ok ? '连接成功' : `HTTP ${response.status}` };
+                    } catch (e) {
+                        return { success: false, message: '无法连接' };
+                    }
+                }
+                return { success: false, message: '凭证格式无效' };
+            }
+            default:
+                return { success: false, message: '不支持的凭证类型' };
+        }
+    } catch (error) {
+        return { success: false, message: error.message };
+    }
+}
+
+// 获取统计信息
+app.get('/api/full-accounts-stats', authMiddleware, async (req, res) => {
+    try {
+        const store = await FullAccountStore.create();
+        const stats = await store.getStatistics();
+        res.json({ success: true, data: stats });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// ============ 模型映射 API ============
+
+// 获取所有模型映射
+app.get('/api/model-mappings', authMiddleware, async (req, res) => {
+    try {
+        const store = await ModelMappingStore.create();
+        const mappings = await store.getAll();
+        res.json({ success: true, data: mappings });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// 获取指定提供商的模型映射
+app.get('/api/model-mappings/provider/:provider', authMiddleware, async (req, res) => {
+    try {
+        const store = await ModelMappingStore.create();
+        const mappings = await store.getByProvider(req.params.provider);
+        res.json({ success: true, data: mappings });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// 添加模型映射
+app.post('/api/model-mappings', authMiddleware, async (req, res) => {
+    try {
+        const { sourceModel, targetModel, provider, priority } = req.body;
+        if (!sourceModel || !targetModel) {
+            return res.status(400).json({ success: false, error: '源模型和目标模型是必填项' });
+        }
+
+        const store = await ModelMappingStore.create();
+        const id = await store.add({ sourceModel, targetModel, provider, priority });
+        res.json({ success: true, data: { id, message: '映射已添加' } });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// 更新模型映射
+app.put('/api/model-mappings/:id', authMiddleware, async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        const store = await ModelMappingStore.create();
+
+        const existing = await store.getById(id);
+        if (!existing) {
+            return res.status(404).json({ success: false, error: '映射不存在' });
+        }
+
+        await store.update(id, req.body);
+        res.json({ success: true, data: { message: '映射已更新' } });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// 删除模型映射
+app.delete('/api/model-mappings/:id', authMiddleware, async (req, res) => {
+    try {
+        const id = parseInt(req.params.id);
+        const store = await ModelMappingStore.create();
+
+        const existing = await store.getById(id);
+        if (!existing) {
+            return res.status(404).json({ success: false, error: '映射不存在' });
+        }
+
+        await store.delete(id);
+        res.json({ success: true, data: { message: '映射已删除' } });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// 批量添加/更新模型映射
+app.post('/api/model-mappings/batch', authMiddleware, async (req, res) => {
+    try {
+        const { mappings } = req.body;
+        if (!mappings || !Array.isArray(mappings) || mappings.length === 0) {
+            return res.status(400).json({ success: false, error: '请提供映射列表' });
+        }
+
+        const store = await ModelMappingStore.create();
+        const count = await store.batchUpsert(mappings);
+        res.json({ success: true, data: { count, message: `已处理 ${count} 个映射` } });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// 查询模型映射（用于转换）
+app.get('/api/model-mappings/resolve/:model', async (req, res) => {
+    try {
+        const { model } = req.params;
+        const provider = req.query.provider || 'digitalocean';
+
+        const store = await ModelMappingStore.create();
+        const targetModel = await store.findTargetModel(model, provider);
+
+        res.json({
+            success: true,
+            data: {
+                sourceModel: model,
+                targetModel: targetModel || model, // 如果没有映射，返回原模型
+                mapped: !!targetModel
+            }
+        });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// 获取所有可用模型（从所有活跃凭证汇总）
+app.get('/api/available-models', authMiddleware, async (req, res) => {
+    try {
+        const store = await FullAccountStore.create();
+        const accounts = await store.getAllActive();
+
+        // 汇总所有模型
+        const modelMap = new Map();
+        for (const account of accounts) {
+            if (account.models && Array.isArray(account.models)) {
+                for (const model of account.models) {
+                    if (!modelMap.has(model.id)) {
+                        modelMap.set(model.id, {
+                            ...model,
+                            providers: [account.type],
+                            accountCount: 1
+                        });
+                    } else {
+                        const existing = modelMap.get(model.id);
+                        if (!existing.providers.includes(account.type)) {
+                            existing.providers.push(account.type);
+                        }
+                        existing.accountCount++;
+                    }
+                }
+            }
+        }
+
+        const models = Array.from(modelMap.values()).sort((a, b) => a.id.localeCompare(b.id));
+        res.json({ success: true, data: models });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+//============ 试用申请 API ============
 
 // 提交试用申请（公开接口，无需登录）
 app.post('/api/trial/apply', async (req, res) => {
@@ -5505,6 +5917,7 @@ async function start() {
 
     // 设置 Bedrock 路由
     app.use('/api/bedrock', bedrockRoutes);
+    app.use('/bedrock', bedrockRoutes);  // 支持 /bedrock/v1/messages
     console.log(`[${getTimestamp()}] Bedrock 服务已启动`);
 
     // 设置 AMI 路由
@@ -5520,6 +5933,10 @@ async function start() {
     app.use('/flow', flowRoutes);
     app.use('/api/flow', flowRoutes);
     console.log(`[${getTimestamp()}] Flow 服务已启动`);
+
+    // 设置 DigitalOcean 路由
+    setupDigitalOceanRoutes(app, verifyApiKey, apiLogStore);
+    console.log(`[${getTimestamp()}] DigitalOcean 服务已启动`);
 
     // 启动定时刷新任务
     startCredentialsRefreshTask();
@@ -5541,8 +5958,9 @@ async function start() {
         console.log('[API]   Orchids 格式: /orchids/v1/messages');
         console.log('[API]   Warp 格式:    /w/v1/messages');
         console.log('[API]   Vertex 格式:  /vertex/v1/messages');
-        console.log('[API]   Bedrock 格式: /api/bedrock/chat');
+        console.log('[API]   Bedrock 格式: /bedrock/v1/messages');
         console.log('[API]   Flow 格式:    /flow/v1/chat/completions');
+        console.log('[API]   DO 格式:      /do/v1/chat/completions');
         console.log('[API]   模型列表:     /v1/models');
     });
 }

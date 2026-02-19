@@ -220,11 +220,16 @@ export const BEDROCK_CONSTANTS = {
 
 /**
  * Bedrock Claude 模型映射
+ * 注意：部分模型需要使用 inference profile ID 而非直接模型 ID
  */
 export const BEDROCK_MODEL_MAPPING = {
-    // Claude 4.5 Opus
-    'claude-opus-4-5': 'anthropic.claude-opus-4-5-20251101-v1:0',
-    'claude-opus-4-5-20251101': 'anthropic.claude-opus-4-5-20251101-v1:0',
+    // Claude 4.6 Opus (最新) - 使用 cross-region inference profile
+    'claude-opus-4-6': 'us.anthropic.claude-opus-4-6-v1',
+    // Claude 4.6 Sonnet (最新)
+    'claude-sonnet-4-6': 'us.anthropic.claude-sonnet-4-6-v1',
+    // Claude 4.5 Opus - 使用 cross-region inference profile
+    'claude-opus-4-5': 'us.anthropic.claude-opus-4-5-20251101-v1:0',
+    'claude-opus-4-5-20251101': 'us.anthropic.claude-opus-4-5-20251101-v1:0',
     // Claude Sonnet 4.5
     'claude-sonnet-4-5': 'anthropic.claude-sonnet-4-5-20250929-v1:0',
     'claude-sonnet-4-5-20250929': 'anthropic.claude-sonnet-4-5-20250929-v1:0',
@@ -258,6 +263,8 @@ export const BEDROCK_MODEL_MAPPING = {
  * Bedrock 支持的模型列表
  */
 export const BEDROCK_MODELS = [
+    'claude-opus-4-6',
+    'claude-sonnet-4-6',
     'claude-opus-4-5-20251101',
     'claude-sonnet-4-5-20250929',
     'claude-sonnet-4-20250514',
@@ -274,6 +281,12 @@ export const BEDROCK_MODELS = [
  * 模型定价配置（美元/百万 tokens）
  */
 export const MODEL_PRICING = {
+    // Claude Opus 4.6
+    'claude-opus-4-6': { input: 15, output: 75 },
+
+    // Claude Sonnet 4.6
+    'claude-sonnet-4-6': { input: 3, output: 15 },
+
     // Claude Opus 4.5
     'claude-opus-4-5-20251101': { input: 15, output: 75 },
     'claude-opus-4.5': { input: 15, output: 75 },

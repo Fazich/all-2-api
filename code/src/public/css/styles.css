@@ -3146,3 +3146,166 @@ body {
 .empty-state p {
     font-size: 14px;
 }
+
+/* ============ Models List Styles ============ */
+
+.models-search {
+    margin-bottom: 16px;
+}
+
+.models-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 12px;
+    max-height: 400px;
+    overflow-y: auto;
+    padding-right: 8px;
+}
+
+.model-card {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 14px;
+    transition: all var(--transition-fast);
+}
+
+.model-card:hover {
+    border-color: var(--accent-primary);
+    background: var(--bg-card-hover);
+}
+
+.model-id {
+    font-family: 'SF Mono', Monaco, monospace;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 6px;
+    word-break: break-all;
+}
+
+.model-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.model-owner {
+    font-size: 11px;
+    color: var(--text-muted);
+    background: var(--bg-elevated);
+    padding: 2px 8px;
+    border-radius: 10px;
+}
+
+.models-count {
+    font-size: 13px;
+    color: var(--text-muted);
+}
+
+.empty-text {
+    text-align: center;
+    color: var(--text-muted);
+    padding: 40px 20px;
+    font-size: 14px;
+}
+
+/* ============ Model Mapping Styles ============ */
+
+.mapping-form {
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    margin-bottom: 20px;
+}
+
+.mapping-form .form-row {
+    display: flex;
+    gap: 12px;
+    align-items: flex-end;
+}
+
+.mappings-list {
+    max-height: 350px;
+    overflow-y: auto;
+}
+
+.mappings-list .data-table {
+    font-size: 13px;
+}
+
+.mappings-list .data-table td {
+    padding: 12px 14px;
+}
+
+.mappings-list code {
+    background: var(--bg-tertiary);
+    padding: 2px 8px;
+    border-radius: var(--radius-xs);
+    font-family: 'SF Mono', Monaco, monospace;
+    font-size: 12px;
+    color: var(--accent-cyan);
+}
+
+/* 图标操作按钮 */
+.btn-icon-action {
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    border: none;
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: all var(--transition-fast);
+}
+
+.btn-icon-action svg {
+    width: 16px;
+    height: 16px;
+}
+
+.btn-icon-action:hover {
+    background: var(--bg-tertiary);
+    color: var(--accent-primary);
+}
+
+.btn-icon-action.danger:hover {
+    background: var(--accent-danger-bg);
+    color: var(--accent-danger);
+}
+
+/* 统计卡片图标颜色 */
+.stat-icon.success {
+    background: var(--accent-success-bg);
+    color: var(--accent-success);
+}
+
+.stat-icon.warning {
+    background: var(--accent-warning-bg);
+    color: var(--accent-warning);
+}
+
+/* 区域文本 */
+.region-text {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+@media (max-width: 768px) {
+    .models-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .mapping-form .form-row {
+        flex-direction: column;
+    }
+
+    .mapping-form .form-group {
+        width: 100% !important;
+        flex: none !important;
+    }
+}
