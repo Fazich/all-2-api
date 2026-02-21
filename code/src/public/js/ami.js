@@ -102,17 +102,17 @@ async function loadCredentials() {
     }
 }
 
-// 更新统计
+// 更新统计（使用 ami- 前缀 ID，避免与侧边栏 common.js 冲突）
 function updateStats() {
     const total = credentials.length;
     const active = credentials.filter(c => c.status === 'active' && c.isActive).length;
     const error = credentials.filter(c => c.status === 'error' || c.errorCount > 0).length;
     const usage = credentials.reduce((sum, c) => sum + (c.useCount || 0), 0);
 
-    document.getElementById('stat-total').textContent = total;
-    document.getElementById('stat-active').textContent = active;
-    document.getElementById('stat-error').textContent = error;
-    document.getElementById('stat-usage').textContent = usage;
+    document.getElementById('ami-stat-total').textContent = total;
+    document.getElementById('ami-stat-active').textContent = active;
+    document.getElementById('ami-stat-error').textContent = error;
+    document.getElementById('ami-stat-usage').textContent = usage;
 }
 
 // 渲染凭据列表

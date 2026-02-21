@@ -7,22 +7,126 @@ import { logger } from '../logger.js';
 
 const log = logger.server;
 
+/**
+ * 清洗 sessionCookie：自动去除 wos-session= 前缀
+ */
+function cleanCookie(raw) {
+    if (!raw) return raw;
+    return raw.startsWith('wos-session=') ? raw.substring('wos-session='.length) : raw;
+}
+
+/**
+ * 创建 AMI 对话请求 handler（可复用）
+ * 供 /ami/v1/messages 路由和 server.js Model-Provider 路由共用
+ */
+export function createAmiMessagesHandler(amiStore, verifyApiKey) {
+    return async function handleAmiMessages(req, res) {
+        let credential = null;
+
+        try {
+            // 验证 API Key
+            const apiKey = req.headers['x-api-key'] || req.headers['authorization']?.replace('Bearer ', '');
+            if (!apiKey) {
+                return res.status(401).json({
+                    type: 'error',
+                    error: { type: 'authentication_error', message: '缺少 API Key' },
+                });
+            }
+
+            const keyRecord = await verifyApiKey(apiKey);
+            if (!keyRecord || !keyRecord.isActive) {
+                return res.status(401).json({
+                    type: 'error',
+                    error: { type: 'authentication_error', message: 'API Key 无效或已禁用' },
+                });
+            }
+
+            const { model, messages, stream = true, system, max_tokens, temperature, tools } = req.body;
+
+            // 使用 DB 层负载均衡选取凭据（按 use_count 升序 + 随机）
+            credential = await amiStore.getRandomActive();
+
+            if (!credential) {
+                return res.status(503).json({
+                    type: 'error',
+                    error: { type: 'service_unavailable', message: '没有可用的 AMI 凭据' },
+                });
+            }
+
+            // 自动清洗 cookie
+            credential.sessionCookie = cleanCookie(credential.sessionCookie);
+
+            const service = new AmiService(credential);
+
+            // 如果缺少 projectId 或 chatId，自动创建项目并回写 DB
+            if (!credential.projectId || !credential.chatId) {
+                const project = await service.createProject(`API-${credential.name || credential.id}`);
+                await amiStore.update(credential.id, {
+                    projectId: project.projectId,
+                    chatId: project.chatId,
+                });
+            }
+
+            log.info(`[AMI] 对话请求: model=${model}, stream=${stream}, credential=${credential.id}`);
+
+            const requestBody = { messages, system, max_tokens, temperature, tools };
+
+            if (stream) {
+                res.setHeader('Content-Type', 'text/event-stream');
+                res.setHeader('Cache-Control', 'no-cache');
+                res.setHeader('Connection', 'keep-alive');
+                res.setHeader('X-Accel-Buffering', 'no');
+
+                try {
+                    for await (const event of service.generateContentStream(model, requestBody)) {
+                        res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+                    }
+                } catch (streamError) {
+                    log.error(`[AMI] 流式响应错误: ${streamError.message}`);
+                    res.write(`event: error\ndata: ${JSON.stringify({ type: 'error', error: { message: streamError.message } })}\n\n`);
+                    await amiStore.incrementErrorCount(credential.id, streamError.message);
+                }
+
+                res.end();
+            } else {
+                const response = await service.generateContent(model, requestBody);
+                res.json(response);
+            }
+
+            // 成功后递增使用次数
+            await amiStore.incrementUseCount(credential.id);
+        } catch (error) {
+            log.error(`[AMI] 对话请求失败: ${error.message}`);
+
+            if (credential) {
+                await amiStore.incrementErrorCount(credential.id, error.message);
+            }
+
+            if (!res.headersSent) {
+                res.status(500).json({
+                    type: 'error',
+                    error: { type: 'api_error', message: error.message },
+                });
+            }
+        }
+    };
+}
+
 export function setupAmiRoutes(app, amiStore, verifyApiKey) {
 
     // ============ 统计 API ============
 
-    // 获取 AMI 统计信息
     app.get('/api/ami/statistics', async (req, res) => {
         try {
-            const credentials = await amiStore.getAll();
-            const total = credentials.length;
-            const active = credentials.filter(c => c.status === 'active' && c.isActive !== false).length;
-            const error = credentials.filter(c => c.status === 'error').length;
-            const totalUsage = credentials.reduce((sum, c) => sum + (c.useCount || 0), 0);
-
+            const stats = await amiStore.getStatistics();
             res.json({
                 success: true,
-                data: { total, active, error, totalUsage }
+                data: {
+                    total: stats.total,
+                    active: stats.active,
+                    error: stats.error,
+                    totalUsage: stats.totalUseCount,
+                },
             });
         } catch (error) {
             log.error(`[AMI] 获取统计信息失败: ${error.message}`);
@@ -36,7 +140,6 @@ export function setupAmiRoutes(app, amiStore, verifyApiKey) {
     app.get('/api/ami/credentials', async (req, res) => {
         try {
             const credentials = await amiStore.getAll();
-            // 隐藏敏感信息
             const safeCredentials = credentials.map(c => ({
                 ...c,
                 sessionCookie: c.sessionCookie ? '***' + c.sessionCookie.slice(-20) : null,
@@ -59,7 +162,7 @@ export function setupAmiRoutes(app, amiStore, verifyApiKey) {
 
             const credential = await amiStore.add({
                 name: name || `AMI-${Date.now()}`,
-                sessionCookie,
+                sessionCookie: cleanCookie(sessionCookie),
                 projectId: projectId || '',
                 chatId: chatId || '',
                 note: note || '',
@@ -80,14 +183,12 @@ export function setupAmiRoutes(app, amiStore, verifyApiKey) {
             const id = parseInt(req.params.id);
             const { name, sessionCookie, projectId, chatId, note, status } = req.body;
 
-            const updated = await amiStore.update(id, {
-                name,
-                sessionCookie,
-                projectId,
-                chatId,
-                note,
-                status,
-            });
+            const updateData = { name, projectId, chatId, note, status };
+            if (sessionCookie !== undefined) {
+                updateData.sessionCookie = cleanCookie(sessionCookie);
+            }
+
+            const updated = await amiStore.update(id, updateData);
 
             if (!updated) {
                 return res.status(404).json({ success: false, error: '凭据不存在' });
@@ -121,116 +222,49 @@ export function setupAmiRoutes(app, amiStore, verifyApiKey) {
 
     // 测试 AMI 凭据
     app.post('/api/ami/credentials/:id/test', async (req, res) => {
+        const id = parseInt(req.params.id);
         try {
-            const id = parseInt(req.params.id);
             const credential = await amiStore.getById(id);
 
             if (!credential) {
                 return res.status(404).json({ success: false, error: '凭据不存在' });
             }
-
-            // 检查必要字段
             if (!credential.sessionCookie) {
                 return res.status(400).json({ success: false, error: '缺少 sessionCookie' });
             }
-            if (!credential.projectId || !credential.chatId) {
-                return res.status(400).json({
-                    success: false,
-                    error: '缺少 projectId 或 chatId，请先编辑凭据填写这些信息（从 AMI URL 中获取）'
-                });
-            }
 
-            // 验证 sessionCookie 格式
-            console.log('🔍 调试信息 - sessionCookie 验证:');
-            console.log('  原始值:', JSON.stringify(credential.sessionCookie));
-            console.log('  长度:', credential.sessionCookie ? credential.sessionCookie.length : 0);
-            console.log('  类型:', typeof credential.sessionCookie);
-
-            // 检查是否包含 wos-session= 前缀，如果有则自动去除
-            let cleanSessionCookie = credential.sessionCookie;
-            if (cleanSessionCookie.startsWith('wos-session=')) {
-                cleanSessionCookie = cleanSessionCookie.substring('wos-session='.length);
-                console.log('🔧 自动去除 wos-session= 前缀');
-                console.log('  清理后的值:', cleanSessionCookie.substring(0, 50) + '...');
-            }
-
-            // 更新验证规则：支持 AMI 的加密 session token 格式（包含 *, -, _, ~ 等字符）
-            if (!cleanSessionCookie.match(/^[a-zA-Z0-9+/=*._~-]{20,}$/)) {
-                console.log('❌ sessionCookie 格式验证失败');
-                console.log('  期望格式: AMI session token 字符 (a-zA-Z0-9+/=*._~-)，至少20字符');
-                console.log('  实际包含的无效字符:', cleanSessionCookie.split('').filter(c => !c.match(/[a-zA-Z0-9+/=*._~-]/)).join(''));
-
-                return res.status(400).json({
-                    success: false,
-                    error: 'sessionCookie 格式无效，请确保复制完整的 wos-session cookie 值',
-                    debug: {
-                        length: cleanSessionCookie ? cleanSessionCookie.length : 0,
-                        invalidChars: cleanSessionCookie ? cleanSessionCookie.split('').filter(c => !c.match(/[a-zA-Z0-9+/=*._~-]/)) : []
-                    }
-                });
-            }
-
-            // 更新 credential 对象中的 sessionCookie
-            credential.sessionCookie = cleanSessionCookie;
-
-            console.log('✅ sessionCookie 格式验证通过');
-
-            // 验证 projectId 和 chatId 格式
-            if (!credential.projectId.match(/^[a-zA-Z0-9]{20,}$/)) {
-                return res.status(400).json({
-                    success: false,
-                    error: 'projectId 格式无效，应该是20+位的字母数字组合'
-                });
-            }
-            if (!credential.chatId.match(/^[a-zA-Z0-9]{20,}$/)) {
-                return res.status(400).json({
-                    success: false,
-                    error: 'chatId 格式无效，应该是20+位的字母数字组合'
-                });
-            }
+            // 自动清洗 cookie
+            credential.sessionCookie = cleanCookie(credential.sessionCookie);
 
             log.info(`[AMI] 开始测试凭据: ${id} (${credential.name})`);
             const service = new AmiService(credential);
 
-            // 发送测试消息
-            const testResult = await service.generateContent('claude-opus-4.5', {
+            // 如果缺少 projectId 或 chatId，自动创建项目
+            if (!credential.projectId || !credential.chatId) {
+                log.info(`[AMI] 凭据 ${id} 缺少 projectId/chatId，自动创建项目...`);
+                const project = await service.createProject(`API-${credential.name || id}`);
+                // 回写到数据库
+                await amiStore.update(id, {
+                    projectId: project.projectId,
+                    chatId: project.chatId,
+                });
+                log.info(`[AMI] 自动创建项目成功: projectId=${project.projectId}, chatId=${project.chatId}`);
+            }
+
+            const testResult = await service.generateContent('claude-sonnet-4', {
                 messages: [{ role: 'user', content: 'Hi' }],
                 max_tokens: 50,
             });
 
-            // 更新状态为 active
-            await amiStore.update(id, {
-                status: 'active',
-                lastUsed: new Date().toISOString(),
-                errorCount: 0,
-                lastErrorMessage: null
-            });
+            // 测试成功：重置错误计数
+            await amiStore.resetErrorCount(id);
 
             log.info(`[AMI] 测试凭据成功: ${id}`);
             res.json({ success: true, message: '凭据有效', response: testResult });
         } catch (error) {
-            // 更新状态为 error 并记录错误信息
-            await amiStore.update(parseInt(req.params.id), {
-                status: 'error',
-                lastErrorMessage: error.message,
-                lastErrorAt: new Date().toISOString()
-            });
-
+            await amiStore.incrementErrorCount(id, error.message);
             log.error(`[AMI] 测试凭据失败: ${error.message}`);
-
-            // 提供更友好的错误信息
-            let userFriendlyError = error.message;
-            if (error.message.includes('认证失败')) {
-                userFriendlyError = '认证失败：sessionCookie 可能已过期，请重新获取';
-            } else if (error.message.includes('访问被拒绝')) {
-                userFriendlyError = '访问被拒绝：projectId 或 chatId 可能不正确';
-            } else if (error.message.includes('项目或聊天不存在')) {
-                userFriendlyError = '项目不存在：请检查 projectId 和 chatId 是否来自有效的 AMI 聊天';
-            } else if (error.message.includes('AMI 服务器内部错误')) {
-                userFriendlyError = 'AMI 服务器错误：可能是服务暂时不可用，请稍后重试';
-            }
-
-            res.status(500).json({ success: false, error: userFriendlyError });
+            res.status(500).json({ success: false, error: error.message });
         }
     });
 
@@ -246,23 +280,14 @@ export function setupAmiRoutes(app, amiStore, verifyApiKey) {
 
             const issues = [];
 
-            // 检查必要字段
             if (!credential.sessionCookie) {
                 issues.push('缺少 sessionCookie');
-            } else if (!credential.sessionCookie.match(/^[a-zA-Z0-9+/=]{20,}$/)) {
-                issues.push('sessionCookie 格式无效，应该是 Base64 编码的字符串');
             }
-
             if (!credential.projectId) {
                 issues.push('缺少 projectId');
-            } else if (!credential.projectId.match(/^[a-zA-Z0-9]{20,}$/)) {
-                issues.push('projectId 格式无效，应该是20+位的字母数字组合');
             }
-
             if (!credential.chatId) {
                 issues.push('缺少 chatId');
-            } else if (!credential.chatId.match(/^[a-zA-Z0-9]{20,}$/)) {
-                issues.push('chatId 格式无效，应该是20+位的字母数字组合');
             }
 
             if (issues.length > 0) {
@@ -270,16 +295,11 @@ export function setupAmiRoutes(app, amiStore, verifyApiKey) {
                     success: false,
                     valid: false,
                     issues,
-                    message: '凭据格式验证失败，请修正以下问题：' + issues.join('; ')
+                    message: '凭据格式验证失败：' + issues.join('; '),
                 });
             }
 
-            res.json({
-                success: true,
-                valid: true,
-                message: '凭据格式验证通过，可以进行测试'
-            });
-
+            res.json({ success: true, valid: true, message: '凭据格式验证通过，可以进行测试' });
         } catch (error) {
             log.error(`[AMI] 验证凭据格式失败: ${error.message}`);
             res.status(500).json({ success: false, error: error.message });
@@ -288,96 +308,13 @@ export function setupAmiRoutes(app, amiStore, verifyApiKey) {
 
     // ============ 对话 API (Claude 格式) ============
 
-    // AMI 对话 API - Claude 格式
-    app.post('/ami/v1/messages', async (req, res) => {
-        try {
-            // 验证 API Key
-            const apiKey = req.headers['x-api-key'] || req.headers['authorization']?.replace('Bearer ', '');
-            if (!apiKey) {
-                return res.status(401).json({
-                    type: 'error',
-                    error: { type: 'authentication_error', message: '缺少 API Key' },
-                });
-            }
+    // 创建可复用的 handler（供 /ami/v1/messages 路由和 server.js 的 Model-Provider 路由共用）
+    const amiMessagesHandler = createAmiMessagesHandler(amiStore, verifyApiKey);
 
-            const keyRecord = await verifyApiKey(apiKey);
-            if (!keyRecord || !keyRecord.isActive) {
-                return res.status(401).json({
-                    type: 'error',
-                    error: { type: 'authentication_error', message: 'API Key 无效或已禁用' },
-                });
-            }
-
-            const { model, messages, stream = true, system, max_tokens, temperature, tools } = req.body;
-
-            // 获取可用的 AMI 凭据
-            const credentials = await amiStore.getAll();
-            const activeCredentials = credentials.filter(c => c.status === 'active');
-
-            if (activeCredentials.length === 0) {
-                return res.status(503).json({
-                    type: 'error',
-                    error: { type: 'service_unavailable', message: '没有可用的 AMI 凭据' },
-                });
-            }
-
-            // 选择一个凭据（可以实现负载均衡）
-            const credential = activeCredentials[Math.floor(Math.random() * activeCredentials.length)];
-            const service = new AmiService(credential);
-
-            log.info(`[AMI] 对话请求: model=${model}, stream=${stream}, credential=${credential.id}`);
-
-            if (stream) {
-                // 流式响应
-                res.setHeader('Content-Type', 'text/event-stream');
-                res.setHeader('Cache-Control', 'no-cache');
-                res.setHeader('Connection', 'keep-alive');
-                res.setHeader('X-Accel-Buffering', 'no');
-
-                try {
-                    for await (const event of service.generateContentStream(model, {
-                        messages,
-                        system,
-                        max_tokens,
-                        temperature,
-                        tools,
-                    })) {
-                        res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
-                    }
-                } catch (streamError) {
-                    log.error(`[AMI] 流式响应错误: ${streamError.message}`);
-                    res.write(`event: error\ndata: ${JSON.stringify({ type: 'error', error: { message: streamError.message } })}\n\n`);
-                }
-
-                res.end();
-            } else {
-                // 非流式响应
-                const response = await service.generateContent(model, {
-                    messages,
-                    system,
-                    max_tokens,
-                    temperature,
-                    tools,
-                });
-
-                res.json(response);
-            }
-
-            // 更新最后使用时间
-            await amiStore.update(credential.id, { lastUsed: new Date().toISOString() });
-
-        } catch (error) {
-            log.error(`[AMI] 对话请求失败: ${error.message}`);
-            res.status(500).json({
-                type: 'error',
-                error: { type: 'api_error', message: error.message },
-            });
-        }
-    });
+    app.post('/ami/v1/messages', amiMessagesHandler);
 
     // ============ 模型列表 ============
 
-    // 获取 AMI 支持的模型
     app.get('/ami/v1/models', (req, res) => {
         const models = Object.keys(AMI_MODELS).map(id => ({
             id,
@@ -389,10 +326,7 @@ export function setupAmiRoutes(app, amiStore, verifyApiKey) {
             parent: null,
         }));
 
-        res.json({
-            object: 'list',
-            data: models,
-        });
+        res.json({ object: 'list', data: models });
     });
 
     log.info('[AMI] 路由已注册');

@@ -33,7 +33,8 @@ import {
 import { setupGeminiRoutes } from './gemini/gemini-routes.js';
 import { setupVertexRoutes } from './vertex/vertex-routes.js';
 import bedrockRoutes from './bedrock/bedrock-routes.js';
-import { setupAmiRoutes } from './ami/ami-routes.js';
+import { setupAmiRoutes, createAmiMessagesHandler } from './ami/ami-routes.js';
+import { AMI_MODELS } from './ami/ami-service.js';
 import { setupCodexRoutes } from './codex/codex-routes.js';
 import { CodexCredentialStore } from './db.js';
 import { CodexService, CODEX_MODELS } from './codex/codex-service.js';
@@ -128,6 +129,8 @@ let warpService = null;
 let trialStore = null;
 let siteSettingsStore = null;
 let pricingStore = null;
+let amiStore = null;
+let handleAmiRequest = null;
 
 // 凭据 403 错误计数器
 const credential403Counter = new Map();
@@ -1009,9 +1012,20 @@ app.get('/v1/models', (req, res) => {
         parent: null
     }));
 
+    // 追加 AMI 模型
+    const amiModelList = Object.keys(AMI_MODELS).map(id => ({
+        id: `ami-${id}`,
+        object: 'model',
+        created: Math.floor(Date.now() / 1000),
+        owned_by: 'ami',
+        permission: [],
+        root: id,
+        parent: null
+    }));
+
     res.json({
         object: 'list',
-        data: modelList
+        data: [...modelList, ...amiModelList]
     });
 });
 
@@ -2468,6 +2482,18 @@ app.post('/v1/messages', async (req, res) => {
                 await apiLogStore.create({ ...logData, durationMs: Date.now() - startTime });
             }
             return;
+        }
+
+        // 检查是否需要路由到 AMI
+        const isAmiProvider = modelProvider.toLowerCase() === 'ami' ||
+                              (model && (model.toLowerCase().startsWith('ami-') || Object.keys(AMI_MODELS).includes(model)));
+
+        if (isAmiProvider) {
+            logData.path = '/v1/messages (ami)';
+            decrementConcurrent(keyRecord.id, clientIp);
+
+            // 直接调用 AMI handler（已包含 API Key 验证和凭据选择）
+            return handleAmiRequest(req, res);
         }
 
         // ============ 默认使用 Kiro/Claude Provider ============
@@ -5851,7 +5877,8 @@ async function start() {
     trialStore = await TrialApplicationStore.create();
     siteSettingsStore = await SiteSettingsStore.create();
     pricingStore = await ModelPricingStore.create();
-    const amiStore = await AmiCredentialStore.create();
+    amiStore = await AmiCredentialStore.create();
+    handleAmiRequest = createAmiMessagesHandler(amiStore, verifyApiKey);
 
     // 加载动态定价配置
     try {
@@ -5959,6 +5986,7 @@ async function start() {
         console.log('[API]   Warp 格式:    /w/v1/messages');
         console.log('[API]   Vertex 格式:  /vertex/v1/messages');
         console.log('[API]   Bedrock 格式: /bedrock/v1/messages');
+        console.log('[API]   AMI 格式:    /ami/v1/messages');
         console.log('[API]   Flow 格式:    /flow/v1/chat/completions');
         console.log('[API]   DO 格式:      /do/v1/chat/completions');
         console.log('[API]   模型列表:     /v1/models');
