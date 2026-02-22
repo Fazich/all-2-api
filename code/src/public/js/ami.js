@@ -236,26 +236,15 @@ function renderCard(credential) {
                     <span class="ami-bar-value">${healthPct}%</span>
                 </div>
             </div>
-            <div class="ami-card-details">
-                <div class="ami-card-detail">
-                    <span class="detail-label">Input Tokens</span>
-                    <span class="detail-value">${formatTokens(credential.inputTokens || 0)}</span>
-                </div>
-                <div class="ami-card-detail">
-                    <span class="detail-label">Output Tokens</span>
-                    <span class="detail-value">${formatTokens(credential.outputTokens || 0)}</span>
-                </div>
-                <div class="ami-card-detail">
-                    <span class="detail-label">调用 / 错误</span>
-                    <span class="detail-value">${credential.useCount || 0} / <span style="color:${errCount > 0 ? 'var(--accent-danger)' : 'inherit'}">${errCount}</span></span>
-                </div>
-                <div class="ami-card-detail">
-                    <span class="detail-label">最后使用</span>
-                    <span class="detail-value">${credential.lastUsedAt ? formatDateTime(credential.lastUsedAt) : '-'}</span>
-                </div>
-            </div>
             ${credential.note ? `<div class="ami-card-note">${escapeHtml(credential.note)}</div>` : ''}
             <div class="ami-card-actions">
+                <button class="btn btn-success btn-sm" onclick="refreshQuota(${credential.id})">
+                    <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+                        <polyline points="22 2 22 8 16 8"/>
+                    </svg>
+                    刷新额度
+                </button>
                 <button class="btn btn-secondary btn-sm" onclick="testCredential(${credential.id})">
                     <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <polygon points="5 3 19 12 5 21 5 3"/>

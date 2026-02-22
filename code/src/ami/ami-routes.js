@@ -180,7 +180,7 @@ export function createAmiMessagesHandler(amiStore, verifyApiKey) {
             }
 
             // ── 裁剪消息历史，减少 AMI 输入 token → 加速响应 ──
-            const MAX_CONTEXT_MESSAGES = 12; // 保留最近 N 条消息（约 6 轮对话）
+            const MAX_CONTEXT_MESSAGES = 60; // 保留最近 N 条消息（约 30 轮工具调用）
             if (messages.length > MAX_CONTEXT_MESSAGES + 1) {
                 const first = messages[0]; // 保留第一条用户消息（包含原始需求）
                 const recent = messages.slice(-MAX_CONTEXT_MESSAGES);
