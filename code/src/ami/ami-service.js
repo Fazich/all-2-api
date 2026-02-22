@@ -49,6 +49,13 @@ export const AMI_MODELS = {
 // 默认模型
 const DEFAULT_MODEL = 'anthropic/claude-sonnet-4';
 
+// AMI 工具名 → CLI 工具名映射（去掉版本后缀后的名字）
+// 大部分直接匹配，少数需要特殊映射
+const AMI_TO_CLI_TOOL = {
+    'AskQuestion': 'AskUserQuestion',
+    'TodoRead': 'TodoWrite',  // AMI 没有独立的 TodoRead
+};
+
 /**
  * 生成随机 ID（与 AMI 格式一致）
  */
@@ -149,20 +156,24 @@ class AmiDaemon {
         const input = data.input || {};
         let result;
 
-        if (method === 'daemon:get_project') {
-            const p = this.projects[input.projectId];
-            result = p
-                ? { exists: true, path: p, isGitRepo: fs.existsSync(path.join(p, '.git')) }
-                : { exists: true, path: '/tmp', isGitRepo: false };
-        } else if (method === 'daemon:cancel_all_bash') {
-            result = { cancelledCount: 0 };
-        } else if (method === 'daemon:tool_run' || method === 'daemon:execute_tool') {
+        if (method === 'daemon:tool_run' || method === 'daemon:execute_tool') {
             const toolName = input.toolName || '';
             let args = input.toolInput || input.args || {};
             if (typeof args === 'string') { try { args = JSON.parse(args); } catch { args = {}; } }
+            console.log(`│ 🔧 DAEMON RPC: ${method} tool=${toolName} args=${JSON.stringify(args).slice(0, 120)}`);
             result = { result: this._executeTool(toolName, args, input.cwd || '/tmp') };
         } else {
-            result = { ok: true };
+            console.log(`│ 📡 DAEMON RPC: ${method}`);
+            if (method === 'daemon:get_project') {
+                const p = this.projects[input.projectId];
+                result = p
+                    ? { exists: true, path: p, isGitRepo: fs.existsSync(path.join(p, '.git')) }
+                    : { exists: true, path: '/tmp', isGitRepo: false };
+            } else if (method === 'daemon:cancel_all_bash') {
+                result = { cancelledCount: 0 };
+            } else {
+                result = { ok: true };
+            }
         }
 
         if (this.ws && this.connected) {
@@ -485,6 +496,7 @@ export class AmiService {
 
     /**
      * 将 AMI SSE 事件转换为 Claude 格式
+     * 注意：这是无状态转换，index 重映射由 generateContentStream 处理
      */
     convertAmiEventToClaude(amiEvent) {
         const { type, delta, id, messageId, messageMetadata, finishReason } = amiEvent;
@@ -508,7 +520,7 @@ export class AmiService {
             case 'reasoning-start':
                 return {
                     type: 'content_block_start',
-                    index: parseInt(id) || 0,
+                    index: -1, // 哨兵值，由 generateContentStream 重映射
                     content_block: { type: 'thinking', thinking: '' },
                 };
 
@@ -516,17 +528,17 @@ export class AmiService {
                 if (!delta) return null;
                 return {
                     type: 'content_block_delta',
-                    index: parseInt(id) || 0,
+                    index: -1,
                     delta: { type: 'thinking_delta', thinking: delta },
                 };
 
             case 'reasoning-end':
-                return { type: 'content_block_stop', index: parseInt(id) || 0 };
+                return { type: 'content_block_stop', index: -1 };
 
             case 'text-start':
                 return {
                     type: 'content_block_start',
-                    index: parseInt(id) || 1,
+                    index: -1,
                     content_block: { type: 'text', text: '' },
                 };
 
@@ -534,28 +546,49 @@ export class AmiService {
                 if (!delta) return null;
                 return {
                     type: 'content_block_delta',
-                    index: parseInt(id) || 1,
+                    index: -1,
                     delta: { type: 'text_delta', text: delta },
                 };
 
             case 'text-end':
-                return { type: 'content_block_stop', index: parseInt(id) || 1 };
+                return { type: 'content_block_stop', index: -1 };
 
-            case 'finish':
+            // finish 事件标记为内部事件，由 generateContentStream 判断是否为最终结束
+            // Claude API 合法 stop_reason: end_turn, max_tokens, stop_sequence, tool_use
+            case 'finish': {
+                let reason = 'end_turn';
+                if (finishReason === 'tool-calls') reason = 'tool_use';
+                else if (finishReason === 'length' || finishReason === 'max_tokens') reason = 'max_tokens';
+                else if (finishReason === 'stop_sequence') reason = 'stop_sequence';
                 return {
-                    type: 'message_delta',
-                    delta: {
-                        stop_reason: finishReason === 'stop' ? 'end_turn' : finishReason,
-                        stop_sequence: null,
-                    },
-                    usage: { output_tokens: 0 },
+                    _internal: true,
+                    type: '_finish',
+                    finishReason: reason,
                 };
+            }
+
+            // AMI 工具调用 → 转换为 Claude tool_use block
+            case 'tool-input-available': {
+                const rawName = amiEvent.toolName || 'unknown';
+                // AMI 工具名带版本后缀如 Bash_021025 → 去掉后缀
+                const stripped = rawName.replace(/_\d{6}$/, '');
+                // 应用映射表（如 AskQuestion → AskUserQuestion），无映射则直接用
+                const cleanName = AMI_TO_CLI_TOOL[stripped] || stripped;
+                const toolInput = amiEvent.toolInput || amiEvent.input || {};
+                const toolId = `toolu_${randomId(24)}`;
+                return {
+                    type: 'tool_use_block',
+                    toolName: cleanName,
+                    rawAmiName: stripped, // 保留原始名用于日志
+                    toolId: toolId,
+                    toolInput: typeof toolInput === 'string' ? JSON.parse(toolInput) : toolInput,
+                };
+            }
 
             case 'error': {
                 const errText = amiEvent.errorText || 'unknown error';
                 log.error(`[AmiService] 流内错误: ${errText}`);
 
-                // 判断是否为致命错误（凭据不可再用）
                 const fatalPatterns = [
                     'free message limit',
                     'subscription',
@@ -575,9 +608,7 @@ export class AmiService {
                 };
             }
 
-            // AMI 上下文窗口信息（含 token 用量）
             case 'data-context-window': {
-                // 返回内部事件用于追踪，不发送给客户端（以 _ 开头标记）
                 const cw = amiEvent.contextWindow || amiEvent.data || {};
                 return {
                     _internal: true,
@@ -597,10 +628,12 @@ export class AmiService {
             case 'data-heartbeat':
             case 'tool-input-start':
             case 'tool-input-delta':
-            case 'tool-input-available':
+                return null;
+
+            // daemon 已执行工具的标记（用于清除 pendingToolUse 缓冲）
             case 'tool-output-available':
             case 'tool-output-error':
-                return null;
+                return { _internal: true, type: '_tool_consumed' };
 
             default:
                 log.debug(`[AmiService] 未知事件类型: ${type}`);
@@ -709,7 +742,13 @@ export class AmiService {
      * @yields {object} Claude 格式的 SSE 事件
      */
     async *generateContentStream(model, requestBody) {
-        const { messages, system, max_tokens, temperature } = requestBody;
+        const { messages, system, max_tokens, temperature, tools } = requestBody;
+
+        // 构建 CLI 工具名集合（用于匹配 AMI 工具名）
+        const cliToolNames = new Set((tools || []).map(t => t.name));
+        if (cliToolNames.size > 0) {
+            log.info(`[AmiService] CLI 工具: ${[...cliToolNames].join(', ')}`);
+        }
 
         // 确保 daemon 已连接（工具执行需要）
         await this.ensureDaemon();
@@ -728,25 +767,62 @@ export class AmiService {
 
         const response = await this.sendRequest(amiRequest);
 
-        // 追踪 token 用量
+        // ── 状态追踪 ──
         let trackedInputTokens = 0;
         let trackedOutputTokens = 0;
         let outputTextLen = 0;
+        let blockIndex = 0;        // 单调递增的 content block 索引
+        let currentBlockIdx = -1;  // 当前活跃 block 的映射后索引
+        let lastFinishReason = 'end_turn'; // 缓冲 finish 事件，只在流结束后发
+        let hasYieldedStart = false;
+        let earlyFinish = false;    // 遇到 CLI 工具时提前结束
+
+        let eventCount = 0;
+        let textAccum = '';
+        console.log('\n┌─── AMI SSE STREAM START ───');
 
         for await (const amiEvent of this.parseSSEStream(response.data)) {
+            eventCount++;
+            const evType = amiEvent.type || 'unknown';
+
+            // ── 控制台打印 ──
+            if (evType === 'text-delta' || evType === 'reasoning-delta') {
+                textAccum += (amiEvent.delta || '');
+            } else {
+                if (textAccum) {
+                    console.log(`│ #${eventCount-1} delta (累积 ${textAccum.length} 字符): "${textAccum.slice(0, 80)}${textAccum.length > 80 ? '...' : ''}"`);
+                    textAccum = '';
+                }
+                let detail = '';
+                if (evType === 'tool-input-available') detail = ` tool=${amiEvent.toolName || '?'} input=${JSON.stringify(amiEvent.toolInput || amiEvent.input || {}).slice(0, 120)}`;
+                else if (evType === 'tool-input-start') detail = ` tool=${amiEvent.toolName || '?'}`;
+                else if (evType === 'tool-output-available') detail = ` result=${JSON.stringify(amiEvent.output || amiEvent.result || '').slice(0, 120)}`;
+                else if (evType === 'tool-output-error') detail = ` error=${amiEvent.errorText || amiEvent.error || '?'}`;
+                else if (evType === 'finish') detail = ` reason=${amiEvent.finishReason || '?'}`;
+                else if (evType === 'error') detail = ` ${amiEvent.errorText || '?'}`;
+                else if (evType === 'start') detail = ` model=${amiEvent.messageMetadata?.model || '?'}`;
+                else if (evType === 'data-context-window') {
+                    const cw = amiEvent.contextWindow || amiEvent.data || {};
+                    detail = ` input=${cw.inputTokens||0} output=${cw.outputTokens||0}`;
+                }
+                console.log(`│ #${eventCount} ${evType}${detail}`);
+            }
+
             const claudeEvent = this.convertAmiEventToClaude(amiEvent);
             if (!claudeEvent) continue;
 
-            // 内部事件处理
+            // ── 内部事件处理（不发给 CLI）──
             if (claudeEvent._internal) {
                 if (claudeEvent.type === '_usage') {
                     trackedInputTokens = claudeEvent.inputTokens || trackedInputTokens;
                     trackedOutputTokens = claudeEvent.outputTokens || trackedOutputTokens;
+                } else if (claudeEvent.type === '_finish') {
+                    lastFinishReason = claudeEvent.finishReason || 'end_turn';
+                    console.log(`│ ⏸ 缓冲 finish (reason=${lastFinishReason})，不发给 CLI`);
                 } else if (claudeEvent.type === '_error') {
-                    // 将错误作为客户端可见事件 yield 出去，附带 _fatal 标记供路由层处理
                     yield {
                         type: 'content_block_delta',
-                        index: 1,
+                        index: currentBlockIdx >= 0 ? currentBlockIdx : 0,
                         delta: { type: 'text_delta', text: `\n[AMI Error: ${claudeEvent.message}]\n` },
                         _fatal: claudeEvent.fatal,
                         _errorMessage: claudeEvent.message,
@@ -755,32 +831,106 @@ export class AmiService {
                 continue;
             }
 
-            // 从文本增量累计输出长度（用于估算 fallback）
-            if (claudeEvent.type === 'content_block_delta') {
-                const txt = claudeEvent.delta?.text || claudeEvent.delta?.thinking || '';
-                outputTextLen += txt.length;
+            // ── tool_use_block：判断是否为 CLI 工具 ──
+            if (claudeEvent.type === 'tool_use_block') {
+                const isCliTool = cliToolNames.has(claudeEvent.toolName);
+                if (isCliTool) {
+                    // CLI 能处理此工具 → 转发 tool_use + 提前断流
+                    const idx = blockIndex++;
+                    const inputJson = JSON.stringify(claudeEvent.toolInput || {});
+                    console.log(`│ → CLI: tool_use index=${idx} name=${claudeEvent.toolName} id=${claudeEvent.toolId} ★ 提前断流转发`);
+
+                    yield {
+                        type: 'content_block_start',
+                        index: idx,
+                        content_block: { type: 'tool_use', id: claudeEvent.toolId, name: claudeEvent.toolName, input: {} },
+                    };
+                    yield {
+                        type: 'content_block_delta',
+                        index: idx,
+                        delta: { type: 'input_json_delta', partial_json: inputJson },
+                    };
+                    yield { type: 'content_block_stop', index: idx };
+
+                    lastFinishReason = 'tool_use';
+                    earlyFinish = true;
+                    break; // 跳出 SSE 循环
+                } else {
+                    // 非 CLI 工具（如 BrowserExecute）→ daemon 本地处理，忽略
+                    console.log(`│ ⊘ 忽略非 CLI 工具: ${claudeEvent.toolName}`);
+                }
+                continue;
             }
 
-            // 在 message_start 中填入 input_tokens
-            if (claudeEvent.type === 'message_start' && claudeEvent.message) {
+            // ── content block 索引重映射 ──
+            if (claudeEvent.type === 'message_start') {
+                if (hasYieldedStart) continue; // 只发一次 message_start
+                hasYieldedStart = true;
                 claudeEvent.message.usage = {
                     input_tokens: trackedInputTokens || inputEstimate,
                     output_tokens: 0,
                 };
+                console.log(`│ → CLI: message_start`);
+                yield claudeEvent;
+                continue;
             }
 
-            // 在 message_delta 中填入 output_tokens
-            if (claudeEvent.type === 'message_delta') {
-                const outTokens = trackedOutputTokens || Math.ceil(outputTextLen / 4);
-                claudeEvent.usage = { output_tokens: outTokens };
+            if (claudeEvent.type === 'content_block_start') {
+                currentBlockIdx = blockIndex++;
+                claudeEvent.index = currentBlockIdx;
+                console.log(`│ → CLI: content_block_start index=${currentBlockIdx} type=${claudeEvent.content_block?.type}`);
+                yield claudeEvent;
+                continue;
             }
 
+            if (claudeEvent.type === 'content_block_delta') {
+                if (currentBlockIdx < 0) continue; // 无活跃 block，丢弃
+                claudeEvent.index = currentBlockIdx;
+                const txt = claudeEvent.delta?.text || claudeEvent.delta?.thinking || '';
+                outputTextLen += txt.length;
+                yield claudeEvent;
+                continue;
+            }
+
+            if (claudeEvent.type === 'content_block_stop') {
+                if (currentBlockIdx < 0) continue;
+                claudeEvent.index = currentBlockIdx;
+                console.log(`│ → CLI: content_block_stop index=${currentBlockIdx}`);
+                currentBlockIdx = -1; // block 已关闭
+                yield claudeEvent;
+                continue;
+            }
+
+            // 其他事件直接 yield
             yield claudeEvent;
         }
 
-        // 最终 usage（优先用 AMI 上报值，否则估算）
+        // ── 流结束 ──
+        if (textAccum) {
+            console.log(`│ #${eventCount} delta (累积 ${textAccum.length} 字符): "${textAccum.slice(0, 80)}..."`);
+        }
+
+        // 提前断流时销毁 SSE 连接（停止 AMI agent 继续执行）
+        if (earlyFinish && response.data && typeof response.data.destroy === 'function') {
+            console.log(`│ ⚡ 提前断流: destroy SSE 连接`);
+            response.data.destroy();
+        }
+
+        // 发送最终 message_delta（只在流结束后发一次）
+        const outTokens = trackedOutputTokens || Math.ceil(outputTextLen / 4);
+        const finalDelta = {
+            type: 'message_delta',
+            delta: { stop_reason: lastFinishReason, stop_sequence: null },
+            usage: { output_tokens: outTokens },
+        };
+        console.log(`│ → CLI: message_delta stop_reason=${lastFinishReason} (最终)`);
+        yield finalDelta;
+
         const finalInput = trackedInputTokens || inputEstimate;
         const finalOutput = trackedOutputTokens || Math.ceil(outputTextLen / 4);
+        const suffix = earlyFinish ? ' [EARLY FINISH → tool_use]' : '';
+        console.log(`└─── AMI SSE STREAM END: ${eventCount} events, ${blockIndex} blocks, text=${outputTextLen} chars${suffix} ───\n`);
+        log.info(`[AmiService] SSE流结束: 共 ${eventCount} 个事件, ${blockIndex} 个block, 输出文本长度=${outputTextLen}${suffix}`);
 
         yield {
             type: 'message_stop',

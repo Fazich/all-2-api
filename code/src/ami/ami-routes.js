@@ -67,7 +67,91 @@ export function createAmiMessagesHandler(amiStore, verifyApiKey) {
                 });
             }
 
-            log.info(`[AMI] 对话请求: model=${model}, stream=${stream}, credential=${credential.id}`);
+            // ── 详细打印 CLI 请求 ──
+            const toolNames = tools?.map(t => t.name) || [];
+            const msgSummary = messages?.map((m, i) => {
+                const role = m.role;
+                let preview = '';
+                if (typeof m.content === 'string') {
+                    preview = m.content.slice(0, 100);
+                } else if (Array.isArray(m.content)) {
+                    preview = m.content.map(b => {
+                        if (b.type === 'text') return `text:"${(b.text || '').slice(0, 60)}"`;
+                        if (b.type === 'tool_use') return `tool_use:${b.name}(id=${b.id})`;
+                        if (b.type === 'tool_result') return `tool_result(id=${b.tool_use_id},err=${b.is_error||false})`;
+                        return b.type;
+                    }).join(' | ');
+                }
+                return `  [${i}] ${role}: ${preview}`;
+            }) || [];
+            console.log('\n╔══════════════ CLI REQUEST ══════════════');
+            console.log(`║ model=${model}, stream=${stream}, tools=${toolNames.length}, credential=${credential.id}`);
+            console.log(`║ system=${system ? system.slice(0, 80) + '...' : '(none)'}`);
+            console.log(`║ messages (${messages?.length || 0}):`);
+            msgSummary.forEach(s => console.log(`║ ${s}`));
+            if (toolNames.length > 0) console.log(`║ tools: ${toolNames.join(', ')}`);
+            console.log('╚═════════════════════════════════════════\n');
+
+            log.info(`[AMI] 对话请求: model=${model}, stream=${stream}, tools=${toolNames.length}, credential=${credential.id}`);
+
+            // ── 拦截无意义请求，节省 AMI 配额 ──
+            const lastMsg = messages?.[messages.length - 1];
+
+            // 1) CLI prefill 请求：assistant 结尾 + 无 tools → 返回空响应
+            if (lastMsg?.role === 'assistant' && toolNames.length === 0) {
+                console.log('║ ⚡ 拦截: prefill 请求 (assistant 结尾 + 无 tools)');
+                if (stream) {
+                    res.setHeader('Content-Type', 'text/event-stream');
+                    res.setHeader('Cache-Control', 'no-cache');
+                    const msgId = 'msg_' + Date.now();
+                    res.write(`event: message_start\ndata: ${JSON.stringify({ type: 'message_start', message: { id: msgId, type: 'message', role: 'assistant', content: [], model: model || 'ami-model', stop_reason: null, stop_sequence: null, usage: { input_tokens: 0, output_tokens: 0 } } })}\n\n`);
+                    res.write(`event: content_block_start\ndata: ${JSON.stringify({ type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } })}\n\n`);
+                    res.write(`event: content_block_stop\ndata: ${JSON.stringify({ type: 'content_block_stop', index: 0 })}\n\n`);
+                    res.write(`event: message_delta\ndata: ${JSON.stringify({ type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: 0 } })}\n\n`);
+                    res.write(`event: message_stop\ndata: ${JSON.stringify({ type: 'message_stop' })}\n\n`);
+                    return res.end();
+                }
+                return res.json({ id: 'msg_' + Date.now(), type: 'message', role: 'assistant', content: [{ type: 'text', text: '' }], model: model || 'ami-model', stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 0, output_tokens: 0 } });
+            }
+
+            // 2) tool_result 请求：提取工具结果，转换为普通用户消息发给 AMI
+            const hasToolResult = lastMsg?.role === 'user' && Array.isArray(lastMsg?.content) && lastMsg.content.some(b => b.type === 'tool_result');
+            if (hasToolResult) {
+                // 从 assistant 消息中查找对应的 tool_use 名
+                const toolUseMap = {};
+                const prevMsg = messages[messages.length - 2];
+                if (prevMsg?.role === 'assistant' && Array.isArray(prevMsg?.content)) {
+                    for (const b of prevMsg.content) {
+                        if (b.type === 'tool_use') toolUseMap[b.id] = b.name;
+                    }
+                }
+
+                const parts = lastMsg.content.map(b => {
+                    if (b.type === 'tool_result') {
+                        const content = typeof b.content === 'string' ? b.content
+                            : Array.isArray(b.content) ? b.content.map(c => c.text || '').join('\n')
+                            : JSON.stringify(b.content || '');
+                        const toolName = toolUseMap[b.tool_use_id] || 'unknown';
+                        if (b.is_error) {
+                            return `[Tool ${toolName} FAILED]: ${content}`;
+                        }
+                        return `[Tool ${toolName} result]: ${content}`;
+                    }
+                    if (b.type === 'text') return b.text || '';
+                    return '';
+                }).filter(Boolean);
+
+                console.log(`║ 🔄 转换 tool_result → 用户消息: ${parts.map(p => p.slice(0, 60)).join(' | ')}`);
+                messages[messages.length - 1] = { role: 'user', content: parts.join('\n') || '继续' };
+                // 移除 messages 中的 tool_use（assistant 消息里的）
+                for (let i = messages.length - 2; i >= 0; i--) {
+                    const m = messages[i];
+                    if (m.role === 'assistant' && Array.isArray(m.content)) {
+                        m.content = m.content.filter(b => b.type !== 'tool_use');
+                        if (m.content.length === 0) m.content = [{ type: 'text', text: '(continued)' }];
+                    }
+                }
+            }
 
             const requestBody = { messages, system, max_tokens, temperature, tools };
 
