@@ -778,24 +778,35 @@ export class AmiService {
 
         let eventCount = 0;
         let textAccum = '';
+        let toolDeltaCount = 0; // 累计 tool-input-delta 数量
         console.log('\n┌─── AMI SSE STREAM START ───');
 
         for await (const amiEvent of this.parseSSEStream(response.data)) {
             eventCount++;
             const evType = amiEvent.type || 'unknown';
 
-            // ── 控制台打印 ──
+            // ── 控制台打印（过滤噪音）──
             if (evType === 'text-delta' || evType === 'reasoning-delta') {
                 textAccum += (amiEvent.delta || '');
+            } else if (evType === 'tool-input-delta') {
+                toolDeltaCount++;
+            } else if (['data-heartbeat', 'data-otel', 'data-lifecycle', 'data-initial', 'finish-step', 'start-step'].includes(evType)) {
+                // 静默跳过低价值事件
             } else {
                 if (textAccum) {
-                    console.log(`│ #${eventCount-1} delta (累积 ${textAccum.length} 字符): "${textAccum.slice(0, 80)}${textAccum.length > 80 ? '...' : ''}"`);
+                    console.log(`│ text ${textAccum.length}字: "${textAccum.slice(0, 80)}${textAccum.length > 80 ? '...' : ''}"`);
                     textAccum = '';
                 }
+                if (toolDeltaCount > 0) {
+                    // tool-input-available 到达时汇总显示
+                }
                 let detail = '';
-                if (evType === 'tool-input-available') detail = ` tool=${amiEvent.toolName || '?'} input=${JSON.stringify(amiEvent.toolInput || amiEvent.input || {}).slice(0, 120)}`;
+                if (evType === 'tool-input-available') {
+                    detail = ` tool=${amiEvent.toolName || '?'} (${toolDeltaCount} deltas) input=${JSON.stringify(amiEvent.toolInput || amiEvent.input || {}).slice(0, 100)}`;
+                    toolDeltaCount = 0;
+                }
                 else if (evType === 'tool-input-start') detail = ` tool=${amiEvent.toolName || '?'}`;
-                else if (evType === 'tool-output-available') detail = ` result=${JSON.stringify(amiEvent.output || amiEvent.result || '').slice(0, 120)}`;
+                else if (evType === 'tool-output-available') detail = ` result=${JSON.stringify(amiEvent.output || amiEvent.result || '').slice(0, 100)}`;
                 else if (evType === 'tool-output-error') detail = ` error=${amiEvent.errorText || amiEvent.error || '?'}`;
                 else if (evType === 'finish') detail = ` reason=${amiEvent.finishReason || '?'}`;
                 else if (evType === 'error') detail = ` ${amiEvent.errorText || '?'}`;
@@ -804,7 +815,7 @@ export class AmiService {
                     const cw = amiEvent.contextWindow || amiEvent.data || {};
                     detail = ` input=${cw.inputTokens||0} output=${cw.outputTokens||0}`;
                 }
-                console.log(`│ #${eventCount} ${evType}${detail}`);
+                console.log(`│ ${evType}${detail}`);
             }
 
             const claudeEvent = this.convertAmiEventToClaude(amiEvent);

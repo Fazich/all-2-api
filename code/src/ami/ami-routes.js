@@ -67,30 +67,29 @@ export function createAmiMessagesHandler(amiStore, verifyApiKey) {
                 });
             }
 
-            // ── 详细打印 CLI 请求 ──
+            // ── 打印 CLI 请求摘要 ──
             const toolNames = tools?.map(t => t.name) || [];
-            const msgSummary = messages?.map((m, i) => {
+            const msgCount = messages?.length || 0;
+            // 只打印最后 2 条消息
+            const tail = (messages || []).slice(-2).map((m, i) => {
+                const idx = msgCount - 2 + i;
                 const role = m.role;
                 let preview = '';
                 if (typeof m.content === 'string') {
-                    preview = m.content.slice(0, 100);
+                    preview = m.content.slice(0, 80);
                 } else if (Array.isArray(m.content)) {
                     preview = m.content.map(b => {
-                        if (b.type === 'text') return `text:"${(b.text || '').slice(0, 60)}"`;
-                        if (b.type === 'tool_use') return `tool_use:${b.name}(id=${b.id})`;
-                        if (b.type === 'tool_result') return `tool_result(id=${b.tool_use_id},err=${b.is_error||false})`;
+                        if (b.type === 'text') return `text:"${(b.text || '').slice(0, 40)}"`;
+                        if (b.type === 'tool_use') return `tool_use:${b.name}`;
+                        if (b.type === 'tool_result') return `tool_result(err=${b.is_error||false})`;
                         return b.type;
                     }).join(' | ');
                 }
-                return `  [${i}] ${role}: ${preview}`;
-            }) || [];
-            console.log('\n╔══════════════ CLI REQUEST ══════════════');
-            console.log(`║ model=${model}, stream=${stream}, tools=${toolNames.length}, credential=${credential.id}`);
-            console.log(`║ system=${system ? system.slice(0, 80) + '...' : '(none)'}`);
-            console.log(`║ messages (${messages?.length || 0}):`);
-            msgSummary.forEach(s => console.log(`║ ${s}`));
-            if (toolNames.length > 0) console.log(`║ tools: ${toolNames.join(', ')}`);
-            console.log('╚═════════════════════════════════════════\n');
+                return `  [${idx < 0 ? 0 : idx}] ${role}: ${preview}`;
+            });
+            console.log(`\n╔═ CLI REQ: model=${model}, msgs=${msgCount}, tools=${toolNames.length}`);
+            tail.forEach(s => console.log(`║ ${s}`));
+            console.log('╚═══════════════════════════════════════');
 
             log.info(`[AMI] 对话请求: model=${model}, stream=${stream}, tools=${toolNames.length}, credential=${credential.id}`);
 
