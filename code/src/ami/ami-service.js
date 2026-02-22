@@ -158,10 +158,9 @@ class AmiDaemon {
 
         if (method === 'daemon:tool_run' || method === 'daemon:execute_tool') {
             const toolName = input.toolName || '';
-            let args = input.toolInput || input.args || {};
-            if (typeof args === 'string') { try { args = JSON.parse(args); } catch { args = {}; } }
-            console.log(`│ 🔧 DAEMON RPC: ${method} tool=${toolName} args=${JSON.stringify(args).slice(0, 120)}`);
-            result = { result: this._executeTool(toolName, args, input.cwd || '/tmp') };
+            console.log(`│ 🔧 DAEMON RPC: ${method} tool=${toolName} → 返回占位结果（不实际执行，由 CLI 执行）`);
+            // 不实际执行工具，返回占位成功结果。CLI 是唯一的工具执行者。
+            result = { result: { type: 'success', result: { stdout: '', stderr: '', interrupted: false, isImage: false } } };
         } else {
             console.log(`│ 📡 DAEMON RPC: ${method}`);
             if (method === 'daemon:get_project') {
