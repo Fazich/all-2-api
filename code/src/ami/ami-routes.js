@@ -41,7 +41,7 @@ export function createAmiMessagesHandler(amiStore, verifyApiKey) {
                 });
             }
 
-            const { model, messages, stream = true, system, max_tokens, temperature, tools } = req.body;
+            let { model, messages, stream = true, system, max_tokens, temperature, tools } = req.body;
 
             // 使用 DB 层负载均衡选取凭据（按 use_count 升序 + 随机）
             credential = await amiStore.getRandomActive();
@@ -150,6 +150,15 @@ export function createAmiMessagesHandler(amiStore, verifyApiKey) {
                         if (m.content.length === 0) m.content = [{ type: 'text', text: '(continued)' }];
                     }
                 }
+            }
+
+            // ── 裁剪消息历史，减少 AMI 输入 token → 加速响应 ──
+            const MAX_CONTEXT_MESSAGES = 12; // 保留最近 N 条消息（约 6 轮对话）
+            if (messages.length > MAX_CONTEXT_MESSAGES + 1) {
+                const first = messages[0]; // 保留第一条用户消息（包含原始需求）
+                const recent = messages.slice(-MAX_CONTEXT_MESSAGES);
+                messages = [first, { role: 'user', content: '[...earlier conversation omitted for brevity...]' }, ...recent];
+                console.log(`║ ✂ 裁剪消息: ${msgCount} → ${messages.length} 条`);
             }
 
             const requestBody = { messages, system, max_tokens, temperature, tools };

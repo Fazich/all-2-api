@@ -644,6 +644,10 @@ export class AmiService {
      * 解析 SSE 流，yield 原始 AMI 事件
      */
     async *parseSSEStream(responseData) {
+        // 轻量标记对象，复用避免 GC
+        const TOOL_DELTA_MARKER = { type: 'tool-input-delta' };
+        const HEARTBEAT_MARKER = { type: 'data-heartbeat' };
+
         let buffer = '';
         for await (const chunk of responseData) {
             buffer += chunk.toString('utf8');
@@ -654,10 +658,13 @@ export class AmiService {
                 if (!line.startsWith('data: ')) continue;
                 const raw = line.slice(6).trim();
                 if (raw === '[DONE]') return;
+                // 快速路径：跳过 tool-input-delta 的完整 JSON 解析（占 90%+ 事件）
+                if (raw.includes('"tool-input-delta"')) { yield TOOL_DELTA_MARKER; continue; }
+                if (raw.includes('"data-heartbeat"')) { yield HEARTBEAT_MARKER; continue; }
                 try {
                     yield JSON.parse(raw);
                 } catch {
-                    log.warn(`[AmiService] 解析 SSE 事件失败: ${line}`);
+                    log.warn(`[AmiService] 解析 SSE 事件失败: ${raw.slice(0, 100)}`);
                 }
             }
         }
