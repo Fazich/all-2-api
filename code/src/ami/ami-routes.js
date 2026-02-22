@@ -17,7 +17,7 @@ function cleanCookie(raw) {
 
 /**
  * 创建 AMI 对话请求 handler（可复用）
- * 供 /ami/v1/messages 路由和 server.js Model-Provider 路由共用
+ * 供 /am/v1/messages 路由和 server.js Model-Provider 路由共用
  */
 export function createAmiMessagesHandler(amiStore, verifyApiKey) {
     return async function handleAmiMessages(req, res) {
@@ -513,10 +513,10 @@ export function setupAmiRoutes(app, amiStore, verifyApiKey) {
 
     // ============ 对话 API (Claude 格式) ============
 
-    // 创建可复用的 handler（供 /ami/v1/messages 路由和 server.js 的 Model-Provider 路由共用）
+    // 创建可复用的 handler（供 /am/v1/messages 路由和 server.js 的 Model-Provider 路由共用）
     const amiMessagesHandler = createAmiMessagesHandler(amiStore, verifyApiKey);
 
-    app.post('/ami/v1/messages', amiMessagesHandler);
+    app.post('/am/v1/messages', amiMessagesHandler);
 
     // ============ 模型列表 ============
 

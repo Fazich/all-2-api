@@ -238,32 +238,28 @@ function renderCard(credential) {
             </div>
             ${credential.note ? `<div class="ami-card-note">${escapeHtml(credential.note)}</div>` : ''}
             <div class="ami-card-actions">
-                <button class="btn btn-success btn-sm" onclick="refreshQuota(${credential.id})">
-                    <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <button class="btn-icon-only success" onclick="refreshQuota(${credential.id})" title="刷新额度">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
                         <polyline points="22 2 22 8 16 8"/>
                     </svg>
-                    刷新额度
                 </button>
-                <button class="btn btn-secondary btn-sm" onclick="testCredential(${credential.id})">
-                    <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <button class="btn-icon-only" onclick="testCredential(${credential.id})" title="测试">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <polygon points="5 3 19 12 5 21 5 3"/>
                     </svg>
-                    测试
                 </button>
-                <button class="btn btn-secondary btn-sm" onclick="openEditModal(${credential.id})">
-                    <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <button class="btn-icon-only" onclick="openEditModal(${credential.id})" title="编辑">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M12 20h9"/>
                         <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/>
                     </svg>
-                    编辑
                 </button>
-                <button class="btn btn-danger btn-sm" onclick="deleteCredential(${credential.id})">
-                    <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <button class="btn-icon-only danger" onclick="deleteCredential(${credential.id})" title="删除">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <polyline points="3 6 5 6 21 6"/>
                         <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
                     </svg>
-                    删除
                 </button>
             </div>
         </div>
@@ -290,6 +286,12 @@ function renderListItem(credential) {
             <div class="ami-list-value">${credential.useCount || 0} 次</div>
             <div class="ami-list-value">${credential.lastUsedAt ? formatDateTime(credential.lastUsedAt) : '-'}</div>
             <div class="ami-list-actions">
+                <button class="btn-icon-only success" onclick="refreshQuota(${credential.id})" title="刷新额度">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+                        <polyline points="22 2 22 8 16 8"/>
+                    </svg>
+                </button>
                 <button class="btn-icon-only" onclick="testCredential(${credential.id})" title="测试">
                     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <polygon points="5 3 19 12 5 21 5 3"/>
@@ -633,5 +635,39 @@ async function handleRefreshAll() {
     } finally {
         btn.disabled = false;
         btn.innerHTML = origText;
+    }
+}
+
+async function refreshQuota(id) {
+    showToast('正在刷新额度...', 'info');
+
+    try {
+        const res = await fetch(`/api/ami/credentials/${id}/refresh`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${authToken}` }
+        });
+
+        const data = await res.json();
+
+        if (data.success) {
+            showToast('额度刷新成功', 'success');
+            const updated = data.data;
+            if (updated) {
+                const idx = credentials.findIndex(c => c.id === id);
+                if (idx !== -1) {
+                    Object.assign(credentials[idx], updated);
+                    updateStats();
+                    const card = document.querySelector(`.ami-card[data-id="${id}"], .ami-list-item[data-id="${id}"]`);
+                    if (card) {
+                        const newHtml = currentView === 'grid' ? renderCard(credentials[idx]) : renderListItem(credentials[idx]);
+                        card.outerHTML = newHtml;
+                    }
+                }
+            }
+        } else {
+            showToast(data.error || '刷新失败', 'error');
+        }
+    } catch (e) {
+        showToast('刷新失败: ' + e.message, 'error');
     }
 }

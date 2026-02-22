@@ -5986,7 +5986,7 @@ async function start() {
         console.log('[API]   Warp 格式:    /w/v1/messages');
         console.log('[API]   Vertex 格式:  /vertex/v1/messages');
         console.log('[API]   Bedrock 格式: /bedrock/v1/messages');
-        console.log('[API]   AMI 格式:    /ami/v1/messages');
+        console.log('[API]   AMI 格式:    /am/v1/messages');
         console.log('[API]   Flow 格式:    /flow/v1/chat/completions');
         console.log('[API]   DO 格式:      /do/v1/chat/completions');
         console.log('[API]   模型列表:     /v1/models');
