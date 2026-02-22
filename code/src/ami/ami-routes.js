@@ -71,6 +71,9 @@ export function createAmiMessagesHandler(amiStore, verifyApiKey) {
 
             const requestBody = { messages, system, max_tokens, temperature, tools };
 
+            let inputTokens = 0;
+            let outputTokens = 0;
+
             if (stream) {
                 res.setHeader('Content-Type', 'text/event-stream');
                 res.setHeader('Cache-Control', 'no-cache');
@@ -79,7 +82,23 @@ export function createAmiMessagesHandler(amiStore, verifyApiKey) {
 
                 try {
                     for await (const event of service.generateContentStream(model, requestBody)) {
-                        res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+                        // 捕获最终 usage（message_stop._usage）
+                        if (event.type === 'message_stop' && event._usage) {
+                            inputTokens = event._usage.input_tokens || 0;
+                            outputTokens = event._usage.output_tokens || 0;
+                        }
+
+                        // 捕获致命错误：标记凭据并禁用
+                        if (event._fatal) {
+                            log.warn(`[AMI] 致命错误，禁用凭据 ${credential.id}: ${event._errorMessage}`);
+                            await amiStore.incrementErrorCount(credential.id, event._errorMessage);
+                            // 直接设置 error_count=3 让 getRandomActive 不再选中
+                            await amiStore.update(credential.id, { status: 'error' });
+                        }
+
+                        // 发送给客户端时移除内部字段
+                        const { _usage, _fatal, _errorMessage, _internal, ...clientEvent } = event;
+                        res.write(`event: ${clientEvent.type}\ndata: ${JSON.stringify(clientEvent)}\n\n`);
                     }
                 } catch (streamError) {
                     log.error(`[AMI] 流式响应错误: ${streamError.message}`);
@@ -90,11 +109,17 @@ export function createAmiMessagesHandler(amiStore, verifyApiKey) {
                 res.end();
             } else {
                 const response = await service.generateContent(model, requestBody);
+                inputTokens = response.usage?.input_tokens || 0;
+                outputTokens = response.usage?.output_tokens || 0;
                 res.json(response);
             }
 
-            // 成功后递增使用次数
+            // 成功后递增使用次数 + token 统计
             await amiStore.incrementUseCount(credential.id);
+            if (inputTokens > 0 || outputTokens > 0) {
+                await amiStore.updateTokenStats(credential.id, inputTokens, outputTokens);
+                log.info(`[AMI] Token 统计: input=${inputTokens}, output=${outputTokens}, credential=${credential.id}`);
+            }
         } catch (error) {
             log.error(`[AMI] 对话请求失败: ${error.message}`);
 
@@ -302,6 +327,67 @@ export function setupAmiRoutes(app, amiStore, verifyApiKey) {
             res.json({ success: true, valid: true, message: '凭据格式验证通过，可以进行测试' });
         } catch (error) {
             log.error(`[AMI] 验证凭据格式失败: ${error.message}`);
+            res.status(500).json({ success: false, error: error.message });
+        }
+    });
+
+    // 批量刷新所有凭据的账户状态（必须在 :id/refresh 之前注册）
+    app.post('/api/ami/credentials/refresh-all', async (req, res) => {
+        try {
+            const all = await amiStore.getAll();
+            const results = [];
+
+            for (const cred of all) {
+                try {
+                    const c = { ...cred, sessionCookie: cleanCookie(cred.sessionCookie) };
+                    const service = new AmiService(c);
+                    const status = await service.checkAccountStatus();
+
+                    await amiStore.updateAccountStatus(cred.id, {
+                        isPaid: status.isPaid,
+                        dailyUsage: status.dailyUsage,
+                        tokenExpiresHours: status.tokenExpiresHours,
+                        status: status.ok ? 'active' : 'error',
+                    });
+                    if (status.ok) await amiStore.resetErrorCount(cred.id);
+
+                    results.push({ id: cred.id, name: cred.name, success: true, ...status });
+                } catch (e) {
+                    await amiStore.incrementErrorCount(cred.id, e.message);
+                    results.push({ id: cred.id, name: cred.name, success: false, error: e.message });
+                }
+            }
+
+            res.json({ success: true, total: all.length, data: results });
+        } catch (error) {
+            log.error(`[AMI] 批量刷新失败: ${error.message}`);
+            res.status(500).json({ success: false, error: error.message });
+        }
+    });
+
+    // 刷新单个凭据的账户状态
+    app.post('/api/ami/credentials/:id/refresh', async (req, res) => {
+        const id = parseInt(req.params.id);
+        try {
+            const credential = await amiStore.getById(id);
+            if (!credential) return res.status(404).json({ success: false, error: '凭据不存在' });
+
+            credential.sessionCookie = cleanCookie(credential.sessionCookie);
+            const service = new AmiService(credential);
+            const status = await service.checkAccountStatus();
+
+            await amiStore.updateAccountStatus(id, {
+                isPaid: status.isPaid,
+                dailyUsage: status.dailyUsage,
+                tokenExpiresHours: status.tokenExpiresHours,
+                status: status.ok ? 'active' : 'error',
+            });
+            if (status.ok) await amiStore.resetErrorCount(id);
+
+            res.json({ success: true, data: status });
+        } catch (error) {
+            log.error(`[AMI] 刷新凭据 ${id} 状态失败: ${error.message}`);
+            await amiStore.incrementErrorCount(id, error.message);
             res.status(500).json({ success: false, error: error.message });
         }
     });

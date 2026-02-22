@@ -36,6 +36,20 @@
                         </svg>
                         刷新
                     </button>
+                    <button class="btn btn-warning" id="refresh-all-btn" title="批量刷新账户状态">
+                        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
+                            <polyline points="22 2 22 8 16 8"/>
+                        </svg>
+                        批量刷新
+                    </button>
+                    <button class="btn btn-secondary" id="paste-import-btn" title="粘贴导入">
+                        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+                            <rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>
+                        </svg>
+                        粘贴导入
+                    </button>
                     <button class="btn btn-primary" id="add-account-btn" title="添加账号">
                         <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                             <line x1="12" y1="5" x2="12" y2="19"/>
@@ -96,9 +110,68 @@
                         </div>
                         <div class="stat-card-info">
                             <div class="stat-card-value" id="ami-stat-usage">0</div>
-                            <div class="stat-card-label">总使用次数</div>
+                            <div class="stat-card-label">Token 用量</div>
                         </div>
                     </div>
+                </div>
+            </div>
+
+            <!-- Pricing Section -->
+            <div class="pricing-section">
+                <div class="pricing-header">
+                    <div class="pricing-title-row">
+                        <div class="pricing-title-left">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18" height="18">
+                                <line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+                            </svg>
+                            <span>Pricing</span>
+                        </div>
+                        <span class="pricing-badge">FREE 2M Tokens</span>
+                    </div>
+                    <p class="pricing-desc">Priced at API cost. We don't charge over.</p>
+                </div>
+                <div class="pricing-table-wrap">
+                    <table class="pricing-table">
+                        <thead>
+                            <tr>
+                                <th>Model</th>
+                                <th>Input</th>
+                                <th>Output</th>
+                                <th>Cached Read</th>
+                                <th>Cached Write</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td><span class="model-dot anthropic"></span>Claude Opus 4.6</td>
+                                <td>$5.00</td><td>$25.00</td><td>$0.50</td><td>$6.25</td>
+                            </tr>
+                            <tr>
+                                <td><span class="model-dot anthropic"></span>Claude Haiku 4.5</td>
+                                <td>$1.00</td><td>$5.00</td><td>$0.10</td><td>$1.25</td>
+                            </tr>
+                            <tr>
+                                <td><span class="model-dot openai"></span>GPT-5.2 Extra High</td>
+                                <td>$1.75</td><td>$14.00</td><td>$0.17</td><td>-</td>
+                            </tr>
+                            <tr>
+                                <td><span class="model-dot openai"></span>GPT-5.2 Codex</td>
+                                <td>$1.75</td><td>$14.00</td><td>$0.17</td><td>-</td>
+                            </tr>
+                            <tr>
+                                <td><span class="model-dot google"></span>Gemini 3 Pro</td>
+                                <td>$2.00</td><td>$12.00</td><td>$0.20</td><td>-</td>
+                            </tr>
+                            <tr>
+                                <td><span class="model-dot glm"></span>GLM 4.7</td>
+                                <td>$0.45</td><td>$1.80</td><td>$0.11</td><td>-</td>
+                            </tr>
+                            <tr>
+                                <td><span class="model-dot kimi"></span>Kimi K2.5</td>
+                                <td>$0.60</td><td>$3.00</td><td>$0.10</td><td>-</td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
 
@@ -342,6 +415,69 @@
                         </button>
                     </div>
                 </form>
+            </div>
+        </div>
+    </div>
+
+    <!-- Paste Import Modal -->
+    <div class="modal-overlay" id="import-modal">
+        <div class="modal ami-modal">
+            <div class="modal-header">
+                <div class="modal-header-content">
+                    <div class="modal-icon">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+                            <rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>
+                        </svg>
+                    </div>
+                    <div>
+                        <h2 class="modal-title">粘贴导入</h2>
+                        <p class="modal-subtitle">批量导入 AMI 账号，每行一个</p>
+                    </div>
+                </div>
+                <button class="modal-close" id="import-modal-close">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                        </svg>
+                        账号数据
+                    </label>
+                    <textarea class="form-textarea" id="import-data" rows="12" placeholder="每行一个账号，格式：邮箱----Cookie&#10;&#10;示例：&#10;user@outlook.com----Fe26.2*1*abc..."></textarea>
+                    <p class="form-hint">格式：邮箱----wos-session Cookie，每行一个账号，用 ---- 分隔</p>
+                </div>
+                <div id="import-progress" style="display:none;">
+                    <div style="margin-bottom:8px;font-size:13px;color:var(--text-secondary);">
+                        导入进度: <span id="import-progress-text">0/0</span>
+                    </div>
+                    <div style="height:6px;background:var(--bg-tertiary);border-radius:3px;overflow:hidden;">
+                        <div id="import-progress-bar" style="height:100%;background:var(--primary);width:0%;transition:width 0.3s;"></div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" id="import-modal-cancel">取消</button>
+                    <button type="button" class="btn btn-secondary" id="import-paste-btn">
+                        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/>
+                            <rect x="8" y="2" width="8" height="4" rx="1" ry="1"/>
+                        </svg>
+                        从剪贴板粘贴
+                    </button>
+                    <button type="button" class="btn btn-primary" id="import-submit-btn">
+                        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <polyline points="20 6 9 17 4 12"/>
+                        </svg>
+                        开始导入
+                    </button>
+                </div>
             </div>
         </div>
     </div>

@@ -61,6 +61,26 @@ function bindEvents() {
         }
     });
 
+    // 粘贴导入按钮
+    document.getElementById('paste-import-btn')?.addEventListener('click', openImportModal);
+    document.getElementById('import-modal-close')?.addEventListener('click', closeImportModal);
+    document.getElementById('import-modal-cancel')?.addEventListener('click', closeImportModal);
+    document.getElementById('import-modal')?.addEventListener('click', (e) => {
+        if (e.target.classList.contains('modal-overlay')) closeImportModal();
+    });
+    document.getElementById('import-paste-btn')?.addEventListener('click', async () => {
+        try {
+            const text = await navigator.clipboard.readText();
+            document.getElementById('import-data').value = text;
+        } catch (e) {
+            showToast('无法访问剪贴板', 'error');
+        }
+    });
+    document.getElementById('import-submit-btn')?.addEventListener('click', handleBatchImport);
+
+    // 批量刷新
+    document.getElementById('refresh-all-btn')?.addEventListener('click', handleRefreshAll);
+
     // 搜索
     document.getElementById('search-input')?.addEventListener('input', (e) => {
         searchQuery = e.target.value.toLowerCase();
@@ -102,17 +122,25 @@ async function loadCredentials() {
     }
 }
 
+// 格式化 token 数量（1234567 → 1.23M）
+function formatTokens(n) {
+    if (n >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+    if (n >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+    if (n >= 1e3) return (n / 1e3).toFixed(1) + 'K';
+    return String(n);
+}
+
 // 更新统计（使用 ami- 前缀 ID，避免与侧边栏 common.js 冲突）
 function updateStats() {
     const total = credentials.length;
     const active = credentials.filter(c => c.status === 'active' && c.isActive).length;
     const error = credentials.filter(c => c.status === 'error' || c.errorCount > 0).length;
-    const usage = credentials.reduce((sum, c) => sum + (c.useCount || 0), 0);
+    const totalTokens = credentials.reduce((sum, c) => sum + (c.inputTokens || 0) + (c.outputTokens || 0), 0);
 
     document.getElementById('ami-stat-total').textContent = total;
     document.getElementById('ami-stat-active').textContent = active;
     document.getElementById('ami-stat-error').textContent = error;
-    document.getElementById('ami-stat-usage').textContent = usage;
+    document.getElementById('ami-stat-usage').textContent = formatTokens(totalTokens);
 }
 
 // 渲染凭据列表
@@ -159,37 +187,74 @@ function renderCard(credential) {
     const statusClass = credential.status === 'active' ? 'active' : 'error';
     const statusText = credential.status === 'active' ? '正常' : '异常';
 
+    // 健康度：errorCount 0→100%, 3→0%
+    const maxErrors = 3;
+    const errCount = credential.errorCount || 0;
+    const healthPct = Math.max(0, Math.round((1 - errCount / maxErrors) * 100));
+    const healthColor = healthPct > 60 ? 'var(--accent-success)' : healthPct > 30 ? 'var(--accent-warning)' : 'var(--accent-danger)';
+
+    // 今日用量 vs 2M 免费额度（2,000,000 tokens）
+    const FREE_QUOTA = 2000000;
+    const dailyUsage = credential.dailyUsage || 0;
+    const quotaPct = Math.min(100, Math.round((dailyUsage / FREE_QUOTA) * 100));
+    const quotaColor = quotaPct < 60 ? 'var(--accent-primary)' : quotaPct < 85 ? 'var(--accent-warning)' : 'var(--accent-danger)';
+
+    // 账户类型
+    const isPaid = credential.isPaid;
+    const accountBadge = isPaid
+        ? '<span class="ami-badge paid">PRO</span>'
+        : '<span class="ami-badge free">FREE</span>';
+
+    // Token 过期
+    const tokenHours = credential.tokenExpiresHours || 0;
+
     return `
         <div class="ami-card" data-id="${credential.id}">
             <div class="ami-card-header">
                 <div class="ami-card-info">
-                    <div class="ami-card-name">${escapeHtml(credential.name)}</div>
-                    <div class="ami-card-id">ID: ${credential.id}</div>
+                    <div class="ami-card-name">${accountBadge} ${escapeHtml(credential.name)}</div>
+                    <div class="ami-card-id">ID: ${credential.id}${tokenHours > 0 ? ` · Token ${tokenHours}h` : ''}</div>
                 </div>
                 <div class="ami-card-status ${statusClass}">
                     <span class="status-dot"></span>
                     ${statusText}
                 </div>
             </div>
+            <div class="ami-card-bars">
+                <div class="ami-bar-row">
+                    <span class="ami-bar-label">今日用量</span>
+                    <div class="ami-bar-track">
+                        <div class="ami-bar-fill" style="width:${quotaPct}%;background:${quotaColor}"></div>
+                    </div>
+                    <span class="ami-bar-value">${formatTokens(dailyUsage)}</span>
+                </div>
+                <div class="ami-bar-row">
+                    <span class="ami-bar-label">健康度</span>
+                    <div class="ami-bar-track">
+                        <div class="ami-bar-fill" style="width:${healthPct}%;background:${healthColor}"></div>
+                    </div>
+                    <span class="ami-bar-value">${healthPct}%</span>
+                </div>
+            </div>
             <div class="ami-card-details">
                 <div class="ami-card-detail">
-                    <span class="detail-label">Project ID</span>
-                    <span class="detail-value">${credential.projectId || '-'}</span>
+                    <span class="detail-label">Input Tokens</span>
+                    <span class="detail-value">${formatTokens(credential.inputTokens || 0)}</span>
                 </div>
                 <div class="ami-card-detail">
-                    <span class="detail-label">Chat ID</span>
-                    <span class="detail-value">${credential.chatId || '-'}</span>
+                    <span class="detail-label">Output Tokens</span>
+                    <span class="detail-value">${formatTokens(credential.outputTokens || 0)}</span>
                 </div>
                 <div class="ami-card-detail">
-                    <span class="detail-label">使用次数</span>
-                    <span class="detail-value">${credential.useCount || 0}</span>
+                    <span class="detail-label">调用 / 错误</span>
+                    <span class="detail-value">${credential.useCount || 0} / <span style="color:${errCount > 0 ? 'var(--accent-danger)' : 'inherit'}">${errCount}</span></span>
                 </div>
                 <div class="ami-card-detail">
                     <span class="detail-label">最后使用</span>
                     <span class="detail-value">${credential.lastUsedAt ? formatDateTime(credential.lastUsedAt) : '-'}</span>
                 </div>
             </div>
-            ${credential.note ? `<div class="ami-card-note" style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">${escapeHtml(credential.note)}</div>` : ''}
+            ${credential.note ? `<div class="ami-card-note">${escapeHtml(credential.note)}</div>` : ''}
             <div class="ami-card-actions">
                 <button class="btn btn-secondary btn-sm" onclick="testCredential(${credential.id})">
                     <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -220,19 +285,20 @@ function renderCard(credential) {
 function renderListItem(credential) {
     const statusClass = credential.status === 'active' ? 'active' : 'error';
     const statusText = credential.status === 'active' ? '正常' : '异常';
+    const badge = credential.isPaid ? '<span class="ami-badge paid">PRO</span>' : '<span class="ami-badge free">FREE</span>';
 
     return `
         <div class="ami-list-item" data-id="${credential.id}">
             <div class="ami-list-name">
-                ${escapeHtml(credential.name)}
+                ${badge} ${escapeHtml(credential.name)}
                 ${credential.note ? `<span class="ami-list-note">${escapeHtml(credential.note)}</span>` : ''}
             </div>
             <div class="ami-list-status ${statusClass}">
                 <span class="status-dot"></span>
                 ${statusText}
             </div>
-            <div class="ami-list-value">${credential.useCount || 0}</div>
-            <div class="ami-list-value">${credential.projectId || '-'}</div>
+            <div class="ami-list-value">${formatTokens(credential.dailyUsage || 0)}</div>
+            <div class="ami-list-value">${credential.useCount || 0} 次</div>
             <div class="ami-list-value">${credential.lastUsedAt ? formatDateTime(credential.lastUsedAt) : '-'}</div>
             <div class="ami-list-actions">
                 <button class="btn-icon-only" onclick="testCredential(${credential.id})" title="测试">
@@ -457,4 +523,126 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// 打开粘贴导入模态框
+function openImportModal() {
+    document.getElementById('import-modal').classList.add('active');
+    document.getElementById('import-data').value = '';
+    document.getElementById('import-progress').style.display = 'none';
+    document.getElementById('import-submit-btn').disabled = false;
+}
+
+// 关闭粘贴导入模态框
+function closeImportModal() {
+    document.getElementById('import-modal').classList.remove('active');
+}
+
+// 批量导入处理
+async function handleBatchImport() {
+    const raw = document.getElementById('import-data').value.trim();
+    if (!raw) {
+        showToast('请粘贴账号数据', 'error');
+        return;
+    }
+
+    // 解析每行：email----cookie
+    const lines = raw.split('\n').map(l => l.trim()).filter(l => l && l.includes('----'));
+    if (lines.length === 0) {
+        showToast('未找到有效数据，请检查格式（邮箱----Cookie）', 'error');
+        return;
+    }
+
+    const entries = lines.map(line => {
+        const idx = line.indexOf('----');
+        const email = line.substring(0, idx).trim();
+        const cookie = line.substring(idx + 4).trim();
+        return { email, cookie };
+    }).filter(e => e.email && e.cookie);
+
+    if (entries.length === 0) {
+        showToast('解析后无有效条目', 'error');
+        return;
+    }
+
+    // 显示进度
+    const progressEl = document.getElementById('import-progress');
+    const progressText = document.getElementById('import-progress-text');
+    const progressBar = document.getElementById('import-progress-bar');
+    progressEl.style.display = 'block';
+    document.getElementById('import-submit-btn').disabled = true;
+
+    let success = 0;
+    let fail = 0;
+
+    for (let i = 0; i < entries.length; i++) {
+        const { email, cookie } = entries[i];
+        progressText.textContent = `${i + 1}/${entries.length}`;
+        progressBar.style.width = `${((i + 1) / entries.length) * 100}%`;
+
+        try {
+            const res = await fetch('/api/ami/credentials', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${authToken}`
+                },
+                body: JSON.stringify({
+                    name: email,
+                    sessionCookie: cookie,
+                })
+            });
+            const data = await res.json();
+            if (data.success) {
+                success++;
+            } else {
+                fail++;
+            }
+        } catch {
+            fail++;
+        }
+    }
+
+    showToast(`导入完成：成功 ${success} 个，失败 ${fail} 个`, success > 0 ? 'success' : 'error');
+    document.getElementById('import-submit-btn').disabled = false;
+
+    if (success > 0) {
+        closeImportModal();
+        await loadCredentials();
+    }
+}
+
+// ============ 批量刷新账户状态 ============
+
+async function handleRefreshAll() {
+    const btn = document.getElementById('refresh-all-btn');
+    if (!btn) return;
+    const origText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = `<svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="animation:spin 0.8s linear infinite"><path d="M21 12a9 9 0 1 1-6.219-8.56"/><polyline points="22 2 22 8 16 8"/></svg> 刷新中...`;
+
+    try {
+        const res = await fetch('/api/ami/credentials/refresh-all', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${authToken}`
+            }
+        });
+        const data = await res.json();
+
+        if (data.success) {
+            const ok = data.data.filter(r => r.success).length;
+            const fail = data.data.filter(r => !r.success).length;
+            showToast(`刷新完成：成功 ${ok} 个，失败 ${fail} 个`, ok > 0 ? 'success' : 'error');
+            await loadCredentials();
+        } else {
+            showToast('批量刷新失败: ' + (data.error || '未知错误'), 'error');
+        }
+    } catch (e) {
+        showToast('批量刷新请求失败: ' + e.message, 'error');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = origText;
+    }
 }

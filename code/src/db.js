@@ -490,6 +490,16 @@ export async function initDatabase() {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
 
+    // AMI 凭证表：追加 token 统计列
+    try { await pool.execute('ALTER TABLE ami_credentials ADD COLUMN input_tokens BIGINT DEFAULT 0'); } catch (e) { /* 列已存在 */ }
+    try { await pool.execute('ALTER TABLE ami_credentials ADD COLUMN output_tokens BIGINT DEFAULT 0'); } catch (e) { /* 列已存在 */ }
+    try { await pool.execute('ALTER TABLE ami_credentials ADD COLUMN total_cost DECIMAL(12,6) DEFAULT 0'); } catch (e) { /* 列已存在 */ }
+    // AMI 凭证表：追加账户状态字段
+    try { await pool.execute('ALTER TABLE ami_credentials ADD COLUMN is_paid TINYINT DEFAULT 0'); } catch (e) { /* 列已存在 */ }
+    try { await pool.execute('ALTER TABLE ami_credentials ADD COLUMN daily_usage BIGINT DEFAULT 0'); } catch (e) { /* 列已存在 */ }
+    try { await pool.execute('ALTER TABLE ami_credentials ADD COLUMN token_expires_hours DECIMAL(8,1) DEFAULT 0'); } catch (e) { /* 列已存在 */ }
+    try { await pool.execute('ALTER TABLE ami_credentials ADD COLUMN last_check_at DATETIME'); } catch (e) { /* 列已存在 */ }
+
     // 创建 Codex 凭证表
     await pool.execute(`
         CREATE TABLE IF NOT EXISTS codex_credentials (
@@ -3979,13 +3989,45 @@ export class AmiCredentialStore {
         const [active] = await this.db.execute('SELECT COUNT(*) as count FROM ami_credentials WHERE is_active = 1 AND status = ?', ['active']);
         const [error] = await this.db.execute('SELECT COUNT(*) as count FROM ami_credentials WHERE status = ?', ['error']);
         const [totalUse] = await this.db.execute('SELECT SUM(use_count) as total FROM ami_credentials');
+        const [tokenStats] = await this.db.execute(`
+            SELECT
+                COALESCE(SUM(input_tokens), 0) as totalInputTokens,
+                COALESCE(SUM(output_tokens), 0) as totalOutputTokens,
+                COALESCE(SUM(total_cost), 0) as totalCost
+            FROM ami_credentials
+        `);
 
         return {
             total: total[0].count,
             active: active[0].count,
             error: error[0].count,
-            totalUseCount: totalUse[0].total || 0
+            totalUseCount: totalUse[0].total || 0,
+            totalInputTokens: Number(tokenStats[0].totalInputTokens) || 0,
+            totalOutputTokens: Number(tokenStats[0].totalOutputTokens) || 0,
+            totalCost: Number(tokenStats[0].totalCost) || 0
         };
+    }
+
+    async updateTokenStats(id, inputTokens, outputTokens, cost = 0) {
+        await this.db.execute(`
+            UPDATE ami_credentials SET
+                input_tokens = input_tokens + ?,
+                output_tokens = output_tokens + ?,
+                total_cost = total_cost + ?
+            WHERE id = ?
+        `, [inputTokens, outputTokens, cost, id]);
+    }
+
+    async updateAccountStatus(id, { isPaid, dailyUsage, tokenExpiresHours, status }) {
+        const fields = [];
+        const values = [];
+        if (isPaid !== undefined)          { fields.push('is_paid = ?');              values.push(isPaid ? 1 : 0); }
+        if (dailyUsage !== undefined)      { fields.push('daily_usage = ?');          values.push(dailyUsage); }
+        if (tokenExpiresHours !== undefined){ fields.push('token_expires_hours = ?'); values.push(tokenExpiresHours); }
+        if (status !== undefined)          { fields.push('status = ?');              values.push(status); }
+        fields.push('last_check_at = NOW()');
+        values.push(id);
+        await this.db.execute(`UPDATE ami_credentials SET ${fields.join(', ')} WHERE id = ?`, values);
     }
 
     _mapRow(row) {
@@ -3999,6 +4041,13 @@ export class AmiCredentialStore {
             status: row.status || 'active',
             isActive: row.is_active === 1,
             useCount: row.use_count || 0,
+            inputTokens: Number(row.input_tokens) || 0,
+            outputTokens: Number(row.output_tokens) || 0,
+            totalCost: Number(row.total_cost) || 0,
+            isPaid: row.is_paid === 1,
+            dailyUsage: Number(row.daily_usage) || 0,
+            tokenExpiresHours: Number(row.token_expires_hours) || 0,
+            lastCheckAt: row.last_check_at,
             lastUsedAt: row.last_used_at,
             errorCount: row.error_count || 0,
             lastErrorAt: row.last_error_at,

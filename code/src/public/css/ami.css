@@ -681,6 +681,205 @@
     background: #059669;
 }
 
+.btn-warning {
+    background: var(--accent-warning);
+    color: white;
+    border: none;
+}
+
+.btn-warning:hover {
+    background: #d97706;
+}
+
+/* ── Account Badge ── */
+.ami-badge {
+    display: inline-block;
+    font-size: 9px;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 4px;
+    letter-spacing: 0.5px;
+    vertical-align: middle;
+    margin-right: 2px;
+}
+
+.ami-badge.paid {
+    background: linear-gradient(135deg, #8b5cf6, #6366f1);
+    color: white;
+}
+
+.ami-badge.free {
+    background: rgba(16, 185, 129, 0.15);
+    color: var(--accent-success);
+}
+
+/* ── Pricing Section ── */
+.pricing-section {
+    padding: 0 28px 8px;
+    background: var(--bg-primary);
+}
+
+.pricing-header {
+    margin-bottom: 12px;
+}
+
+.pricing-title-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin-bottom: 4px;
+}
+
+.pricing-title-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.pricing-title-left svg {
+    color: var(--accent-warning);
+}
+
+.pricing-badge {
+    font-size: 11px;
+    font-weight: 700;
+    padding: 3px 10px;
+    border-radius: 10px;
+    background: linear-gradient(135deg, rgba(16,185,129,0.15) 0%, rgba(52,211,153,0.15) 100%);
+    color: var(--accent-success);
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+
+.pricing-desc {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin: 0;
+}
+
+.pricing-table-wrap {
+    overflow-x: auto;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    background: var(--bg-card);
+}
+
+.pricing-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+    white-space: nowrap;
+}
+
+.pricing-table thead th {
+    padding: 10px 16px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.pricing-table thead th:not(:first-child) {
+    text-align: right;
+}
+
+.pricing-table tbody td {
+    padding: 9px 16px;
+    color: var(--text-secondary);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.pricing-table tbody tr:last-child td {
+    border-bottom: none;
+}
+
+.pricing-table tbody td:first-child {
+    color: var(--text-primary);
+    font-weight: 500;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.pricing-table tbody td:not(:first-child) {
+    text-align: right;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+}
+
+.pricing-table tbody tr:hover {
+    background: var(--bg-card-hover);
+}
+
+.model-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.model-dot.anthropic { background: #d97706; }
+.model-dot.openai    { background: #10b981; }
+.model-dot.google    { background: #3b82f6; }
+.model-dot.glm       { background: #8b5cf6; }
+.model-dot.kimi      { background: #ec4899; }
+
+/* ── Card Progress Bars ── */
+.ami-card-bars {
+    padding: 10px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.ami-bar-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.ami-bar-label {
+    font-size: 11px;
+    color: var(--text-muted);
+    width: 56px;
+    flex-shrink: 0;
+}
+
+.ami-bar-track {
+    flex: 1;
+    height: 6px;
+    background: var(--bg-tertiary);
+    border-radius: 3px;
+    overflow: hidden;
+}
+
+.ami-bar-fill {
+    height: 100%;
+    border-radius: 3px;
+    transition: width 0.4s ease;
+    min-width: 2px;
+}
+
+.ami-bar-value {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    width: 36px;
+    text-align: right;
+    flex-shrink: 0;
+    font-family: 'JetBrains Mono', monospace;
+}
+
 /* Responsive */
 @media (max-width: 1200px) {
     .stats-cards {
@@ -712,7 +911,7 @@
         flex-wrap: wrap;
     }
 
-    .stats-section {
+    .stats-section, .pricing-section {
         padding: 16px 20px;
     }
 

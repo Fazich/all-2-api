@@ -337,6 +337,57 @@ export class AmiService {
     }
 
     /**
+     * 查询账户状态（session、订阅、今日用量）
+     * 参考 ami_monitor.js 的 checkStatus 逻辑
+     * @returns {{ ok, user, isPaid, dailyUsage, tokenExpiresHours, errors }}
+     */
+    async checkAccountStatus() {
+        const result = { ok: true, user: null, isPaid: false, dailyUsage: 0, tokenExpiresHours: 0, errors: [] };
+
+        // 1. Session 有效性
+        try {
+            const sessionData = await this._tRPCGet('/api/v1/trpc/user.session.get');
+            const session = sessionData?.result?.data ?? {};
+            const user = session?.user ?? {};
+            result.user = user.name || user.email || null;
+
+            // cli_token 过期检查
+            const cliToken = session?.cli_token;
+            if (cliToken) {
+                try {
+                    const pad = cliToken.split('.')[1];
+                    const decoded = JSON.parse(Buffer.from(pad, 'base64url').toString());
+                    result.tokenExpiresHours = Math.round(((decoded.exp - Date.now() / 1000) / 3600) * 10) / 10;
+                    if (result.tokenExpiresHours <= 0) {
+                        result.ok = false;
+                        result.errors.push('cli_token 已过期');
+                    }
+                } catch { /* 无法解析 */ }
+            }
+        } catch (e) {
+            result.ok = false;
+            result.errors.push(`Session 无效: ${e.message}`);
+            return result;
+        }
+
+        // 2. 订阅状态
+        try {
+            const pricing = await this._tRPCGet('/api/v1/trpc/pricing.customer');
+            const subs = pricing?.result?.data?.subscriptions?.data ?? [];
+            result.isPaid = subs.length > 0;
+        } catch { /* 忽略 */ }
+
+        // 3. 今日用量
+        try {
+            const usage = await this._tRPCGet('/api/v1/trpc/pricing.usage');
+            const rows = usage?.result?.data?.rows ?? [];
+            result.dailyUsage = rows.reduce((s, r) => s + (r.value || 0), 0);
+        } catch { /* 忽略 */ }
+
+        return result;
+    }
+
+    /**
      * 确保 daemon 已连接（按凭据 ID 复用）
      * 流程：getSession → 启动 WebSocket daemon → 注册 project
      */
@@ -503,16 +554,41 @@ export class AmiService {
             case 'error': {
                 const errText = amiEvent.errorText || 'unknown error';
                 log.error(`[AmiService] 流内错误: ${errText}`);
-                // 将错误信息作为文本传递给客户端
+
+                // 判断是否为致命错误（凭据不可再用）
+                const fatalPatterns = [
+                    'free message limit',
+                    'subscription',
+                    'quota exceeded',
+                    'account suspended',
+                    'session expired',
+                    'unauthorized',
+                    'authentication',
+                ];
+                const isFatal = fatalPatterns.some(p => errText.toLowerCase().includes(p));
+
                 return {
-                    type: 'content_block_delta',
-                    index: 1,
-                    delta: { type: 'text_delta', text: `\n[AMI Error: ${errText}]\n` },
+                    _internal: true,
+                    type: '_error',
+                    fatal: isFatal,
+                    message: errText,
+                };
+            }
+
+            // AMI 上下文窗口信息（含 token 用量）
+            case 'data-context-window': {
+                // 返回内部事件用于追踪，不发送给客户端（以 _ 开头标记）
+                const cw = amiEvent.contextWindow || amiEvent.data || {};
+                return {
+                    _internal: true,
+                    type: '_usage',
+                    inputTokens: cw.inputTokens || cw.contextTokens || 0,
+                    outputTokens: cw.outputTokens || cw.generationTokens || 0,
+                    totalTokens: cw.totalTokens || 0,
                 };
             }
 
             // 可安全忽略的事件
-            case 'data-context-window':
             case 'finish-step':
             case 'start-step':
             case 'data-otel':
@@ -645,16 +721,71 @@ export class AmiService {
 
         const amiRequest = this.buildRequest(allMessages, model, { max_tokens, temperature });
 
+        // 估算输入 tokens（messages JSON 长度 / 4）
+        const inputEstimate = Math.ceil(JSON.stringify(allMessages).length / 4);
+
         log.info(`[AmiService] 发送请求: model=${model}, projectId=${this.projectId}, chatId=${this.chatId}`);
 
         const response = await this.sendRequest(amiRequest);
 
+        // 追踪 token 用量
+        let trackedInputTokens = 0;
+        let trackedOutputTokens = 0;
+        let outputTextLen = 0;
+
         for await (const amiEvent of this.parseSSEStream(response.data)) {
             const claudeEvent = this.convertAmiEventToClaude(amiEvent);
-            if (claudeEvent) yield claudeEvent;
+            if (!claudeEvent) continue;
+
+            // 内部事件处理
+            if (claudeEvent._internal) {
+                if (claudeEvent.type === '_usage') {
+                    trackedInputTokens = claudeEvent.inputTokens || trackedInputTokens;
+                    trackedOutputTokens = claudeEvent.outputTokens || trackedOutputTokens;
+                } else if (claudeEvent.type === '_error') {
+                    // 将错误作为客户端可见事件 yield 出去，附带 _fatal 标记供路由层处理
+                    yield {
+                        type: 'content_block_delta',
+                        index: 1,
+                        delta: { type: 'text_delta', text: `\n[AMI Error: ${claudeEvent.message}]\n` },
+                        _fatal: claudeEvent.fatal,
+                        _errorMessage: claudeEvent.message,
+                    };
+                }
+                continue;
+            }
+
+            // 从文本增量累计输出长度（用于估算 fallback）
+            if (claudeEvent.type === 'content_block_delta') {
+                const txt = claudeEvent.delta?.text || claudeEvent.delta?.thinking || '';
+                outputTextLen += txt.length;
+            }
+
+            // 在 message_start 中填入 input_tokens
+            if (claudeEvent.type === 'message_start' && claudeEvent.message) {
+                claudeEvent.message.usage = {
+                    input_tokens: trackedInputTokens || inputEstimate,
+                    output_tokens: 0,
+                };
+            }
+
+            // 在 message_delta 中填入 output_tokens
+            if (claudeEvent.type === 'message_delta') {
+                const outTokens = trackedOutputTokens || Math.ceil(outputTextLen / 4);
+                claudeEvent.usage = { output_tokens: outTokens };
+            }
+
+            yield claudeEvent;
         }
 
-        yield { type: 'message_stop' };
+        // 最终 usage（优先用 AMI 上报值，否则估算）
+        const finalInput = trackedInputTokens || inputEstimate;
+        const finalOutput = trackedOutputTokens || Math.ceil(outputTextLen / 4);
+
+        yield {
+            type: 'message_stop',
+            _usage: { input_tokens: finalInput, output_tokens: finalOutput },
+        };
     }
 
     /**
@@ -663,6 +794,7 @@ export class AmiService {
     async generateContent(model, requestBody) {
         let thinkingContent = '';
         let textContent = '';
+        let usage = { input_tokens: 0, output_tokens: 0 };
 
         for await (const event of this.generateContentStream(model, requestBody)) {
             if (event.type === 'content_block_delta') {
@@ -671,6 +803,9 @@ export class AmiService {
                 } else if (event.delta?.type === 'text_delta') {
                     textContent += event.delta.text || '';
                 }
+            }
+            if (event.type === 'message_stop' && event._usage) {
+                usage = event._usage;
             }
         }
 
@@ -686,7 +821,7 @@ export class AmiService {
             model: AMI_MODELS[model] || model,
             stop_reason: 'end_turn',
             stop_sequence: null,
-            usage: { input_tokens: 0, output_tokens: 0 },
+            usage,
         };
     }
 }
