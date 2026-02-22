@@ -87,6 +87,33 @@ export function createAmiMessagesHandler(amiStore, verifyApiKey) {
                 }
                 return `  [${idx < 0 ? 0 : idx}] ${role}: ${preview}`;
             });
+            // 从 system prompt 或消息中提取 cwd
+            let extractedCwd = null;
+            const systemStr = typeof system === 'string' ? system
+                : Array.isArray(system) ? system.map(s => typeof s === 'string' ? s : (s.text || '')).join('\n')
+                : '';
+            // 常见模式："/Users/xxx/project" 或 "working directory: /xxx"
+            const cwdMatch = systemStr.match(/(?:working.?directory|cwd|project.?(?:root|path|directory))[:\s]+([\/][^\s\n"']+)/i)
+                || systemStr.match(/(?:^|\s)(\/Users\/[^\s\n"']+)/m)
+                || systemStr.match(/(?:^|\s)(\/home\/[^\s\n"']+)/m);
+            if (cwdMatch) {
+                extractedCwd = cwdMatch[1];
+                console.log(`║ 提取 cwd: ${extractedCwd}`);
+            }
+            // 如果 system 没有，从消息中的文件路径推断
+            if (!extractedCwd && messages?.length > 0) {
+                for (const m of messages) {
+                    const content = typeof m.content === 'string' ? m.content : JSON.stringify(m.content || '');
+                    const pathMatch = content.match(/(\/Users\/[^\s\n"'\\:]+\/[^\s\n"'\\:]+)\//);
+                    if (pathMatch) {
+                        // 取到项目根目录（去掉文件名）
+                        const parts = pathMatch[1].split('/');
+                        extractedCwd = parts.slice(0, -1).join('/') || pathMatch[1];
+                        console.log(`║ 从消息推断 cwd: ${extractedCwd}`);
+                        break;
+                    }
+                }
+            }
             console.log(`\n╔═ CLI REQ: model=${model}, msgs=${msgCount}, tools=${toolNames.length}`);
             tail.forEach(s => console.log(`║ ${s}`));
             console.log('╚═══════════════════════════════════════');
@@ -161,7 +188,7 @@ export function createAmiMessagesHandler(amiStore, verifyApiKey) {
                 console.log(`║ ✂ 裁剪消息: ${msgCount} → ${messages.length} 条`);
             }
 
-            const requestBody = { messages, system, max_tokens, temperature, tools };
+            const requestBody = { messages, system, max_tokens, temperature, tools, cwd: extractedCwd };
 
             let inputTokens = 0;
             let outputTokens = 0;

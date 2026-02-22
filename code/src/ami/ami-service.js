@@ -56,6 +56,14 @@ const AMI_TO_CLI_TOOL = {
     'TodoRead': 'TodoWrite',  // AMI 没有独立的 TodoRead
 };
 
+// 本地处理的工具（不转发给 CLI，不断流，daemon 返回占位结果后 AMI 继续）
+// 这些工具是纯元数据操作，不影响文件系统，省掉 AMI 往返可节省约 40% 时间
+const LOCAL_ONLY_TOOLS = new Set([
+    'TodoWrite', 'TodoRead', 'Task', 'TaskOutput',
+    'EnterPlanMode', 'ExitPlanMode',
+    'AskQuestion', 'AskUserQuestion',  // AMI 参数格式与 CLI 不兼容，本地处理
+]);
+
 /**
  * 生成随机 ID（与 AMI 格式一致）
  */
@@ -167,7 +175,7 @@ class AmiDaemon {
                 const p = this.projects[input.projectId];
                 result = p
                     ? { exists: true, path: p, isGitRepo: fs.existsSync(path.join(p, '.git')) }
-                    : { exists: true, path: '/tmp', isGitRepo: false };
+                    : { exists: true, path: input.cwd || '/tmp', isGitRepo: false };
             } else if (method === 'daemon:cancel_all_bash') {
                 result = { cancelledCount: 0 };
             } else {
@@ -401,14 +409,14 @@ export class AmiService {
      * 确保 daemon 已连接（按凭据 ID 复用）
      * 流程：getSession → 启动 WebSocket daemon → 注册 project
      */
-    async ensureDaemon() {
+    async ensureDaemon(cwd = '/tmp') {
         const credId = this.credential.id;
 
         // 检查池中是否已有存活的 daemon
         const existing = daemonPool.get(credId);
         if (existing && existing.isAlive) {
             // 确保当前 project 已注册
-            if (this.projectId) existing.addProject(this.projectId, '/tmp');
+            if (this.projectId) existing.addProject(this.projectId, cwd);
             return existing;
         }
 
@@ -426,7 +434,7 @@ export class AmiService {
 
         // 创建并启动 daemon
         const daemon = new AmiDaemon(userId, bridgeToken);
-        if (this.projectId) daemon.addProject(this.projectId, '/tmp');
+        if (this.projectId) daemon.addProject(this.projectId, cwd);
 
         log.info(`[AmiService] 启动 daemon WebSocket (userId=${userId})`);
         const ok = await daemon.start();
@@ -450,7 +458,8 @@ export class AmiService {
      */
     buildRequest(messages, model, options = {}) {
         const amiModel = AMI_MODELS[model] || model || DEFAULT_MODEL;
-        const cwd = '/tmp';
+        const cwd = options.cwd || '/tmp';
+        console.log(`│ 📁 AMI cwd: ${cwd}`);
 
         // AMI 不支持 assistant prefill，移除末尾的 assistant 消息
         let filteredMessages = [...messages];
@@ -748,7 +757,7 @@ export class AmiService {
      * @yields {object} Claude 格式的 SSE 事件
      */
     async *generateContentStream(model, requestBody) {
-        const { messages, system, max_tokens, temperature, tools } = requestBody;
+        const { messages, system, max_tokens, temperature, tools, cwd: clientCwd } = requestBody;
 
         // 构建 CLI 工具名集合（用于匹配 AMI 工具名）
         const cliToolNames = new Set((tools || []).map(t => t.name));
@@ -757,14 +766,14 @@ export class AmiService {
         }
 
         // 确保 daemon 已连接（工具执行需要）
-        await this.ensureDaemon();
+        await this.ensureDaemon(clientCwd || '/tmp');
 
         // 如果有 system prompt，将其添加到消息开头
         const allMessages = system
             ? [{ role: 'system', content: system }, ...messages]
             : messages;
 
-        const amiRequest = this.buildRequest(allMessages, model, { max_tokens, temperature });
+        const amiRequest = this.buildRequest(allMessages, model, { max_tokens, temperature, cwd: clientCwd });
 
         // 估算输入 tokens（messages JSON 长度 / 4）
         const inputEstimate = Math.ceil(JSON.stringify(allMessages).length / 4);
@@ -850,6 +859,11 @@ export class AmiService {
 
             // ── tool_use_block：判断是否为 CLI 工具 ──
             if (claudeEvent.type === 'tool_use_block') {
+                // 本地工具：daemon 已返回占位结果，AMI 继续执行，不断流
+                if (LOCAL_ONLY_TOOLS.has(claudeEvent.toolName)) {
+                    console.log(`│ ⚡ 本地处理: ${claudeEvent.toolName}（不断流，AMI 继续）`);
+                    continue;
+                }
                 const isCliTool = cliToolNames.has(claudeEvent.toolName);
                 if (isCliTool) {
                     // CLI 能处理此工具 → 转发 tool_use + 提前断流
