@@ -8,7 +8,7 @@ import { startCodexOAuth, completeCodexOAuth, refreshCodexToken } from './codex-
 // 可选导入：注册模块（Docker 容器中可能不存在）
 let registerModule = null;
 try {
-    registerModule = await import('../../register/codex-register.js');
+    registerModule = await import('../../../register/codex/codex-register.js');
 } catch (e) {
     console.log('[Codex] 注册模块未找到，注册功能不可用');
 }
