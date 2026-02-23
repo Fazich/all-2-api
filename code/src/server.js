@@ -19,7 +19,7 @@ import { setupWarpRoutes } from './warp/warp-routes.js';
 import { setupWarpMultiAgentRoutes } from './warp/warp-multi-agent.js';
 import { setupWarpProxyRoutes } from './warp/warp-proxy.js';
 import { KIRO_CONSTANTS, MODEL_PRICING, calculateTokenCost, setDynamicPricing } from './constants.js';
-import { sendRedeemEmail, sendRechargeEmail } from './mailer.js';
+import { sendRedeemEmail, sendRechargeEmail, sendTrialApprovalEmail } from './mailer.js';
 import { initProxyConfig, getProxyConfig, saveProxyConfig, testProxyConnection, getAxiosProxyConfig } from './proxy.js';
 import {
     AntigravityApiService,
@@ -2157,6 +2157,11 @@ app.post('/api/trial/admin/:id/approve', authMiddleware, async (req, res) => {
 
         // 更新申请状态
         await trialStore.approve(id, req.userId, key, expiresAt, costLimit);
+
+        // 发送审批通过邮件（异步，不阻塞响应）
+        if (application.email) {
+            sendTrialApprovalEmail({ to: application.email, apiKey: key, costLimit, expireHours }).catch(() => {});
+        }
 
         res.json({
             success: true,

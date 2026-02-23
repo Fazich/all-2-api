@@ -79,6 +79,46 @@ export async function sendRedeemEmail({ to, apiKey, packageName, limits }) {
     }
 }
 
+export async function sendTrialApprovalEmail({ to, apiKey, costLimit, expireHours }) {
+    const t = getTransporter();
+    if (!t) return false;
+
+    const fromName = process.env.SMTP_FROM_NAME || 'Kiro API';
+    const from = `"${fromName}" <${process.env.SMTP_USER}>`;
+
+    const html = `
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; max-width: 600px; margin: 0 auto; padding: 32px; background: #1a1a2e; color: #e0e0e0; border-radius: 12px;">
+        <div style="text-align: center; margin-bottom: 24px;">
+            <div style="display: inline-block; background: linear-gradient(135deg, #6366f1, #a855f7); width: 48px; height: 48px; border-radius: 10px; line-height: 48px; font-size: 22px; font-weight: 700; color: white;">K</div>
+            <h2 style="color: #ffffff; margin: 12px 0 4px;">试用申请已通过</h2>
+            <p style="color: #888; font-size: 14px; margin: 0;">您的试用 API Key 已生成</p>
+        </div>
+        <div style="background: #16213e; border: 1px solid #2a2a4a; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+            <p style="font-size: 12px; color: #888; margin: 0 0 8px;">API Key</p>
+            <p style="font-family: 'SF Mono', Monaco, 'Courier New', monospace; font-size: 14px; color: #6366f1; word-break: break-all; margin: 0; padding: 12px; background: #0f0f23; border-radius: 6px;">${apiKey}</p>
+        </div>
+        <div style="background: #16213e; border: 1px solid #2a2a4a; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+            <p style="font-size: 12px; color: #888; margin: 0 0 8px;">试用配额</p>
+            <p style="font-size: 14px; color: #e0e0e0; margin: 0;">金额限制 $${costLimit} | 有效期 ${expireHours} 小时</p>
+        </div>
+        <p style="font-size: 12px; color: #666; text-align: center; margin-top: 24px;">请妥善保管您的 API Key，切勿泄露给他人。</p>
+    </div>`;
+
+    try {
+        await t.sendMail({
+            from,
+            to,
+            subject: `[Kiro API] 试用申请已通过`,
+            html
+        });
+        console.log(`[Mailer] 试用审批邮件已发送至 ${to}`);
+        return true;
+    } catch (error) {
+        console.error('[Mailer] 发送失败:', error.message);
+        return false;
+    }
+}
+
 export async function sendRechargeEmail({ to, packageName, limits }) {
     const t = getTransporter();
     if (!t) return false;
