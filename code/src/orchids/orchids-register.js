@@ -84,7 +84,7 @@ export async function startRegisterTask(count, store, serverUrl) {
  * 执行注册流程
  */
 async function executeRegister(task) {
-    const scriptPath = path.join(__dirname, '..', '..', 'register', 'orchids_register.py');
+    const scriptPath = path.join(__dirname, '..', '..','..', 'register','orchids', 'orchids_register.py');
     
     task.addLog(`脚本路径: ${scriptPath}`);
     task.addLog(`开始注册 ${task.count} 个账号...`);
@@ -127,11 +127,19 @@ async function executeRegister(task) {
                     task.success++;
                 }
                 
+                // 解析密码（在 CLIENT_KEY 之前输出）
+                const passwordMatch = line.match(/PASSWORD:(.+)/);
+                if (passwordMatch) {
+                    task._lastPassword = passwordMatch[1].trim();
+                }
+                
                 // 解析 client_key 并直接添加到数据库
                 const clientKeyMatch = line.match(/CLIENT_KEY:(.+)/);
                 if (clientKeyMatch && task.store) {
                     const clientKey = clientKeyMatch[1].trim();
-                    await addAccountToStore(task, clientKey);
+                    const password = task._lastPassword || null;
+                    task._lastPassword = null;
+                    await addAccountToStore(task, clientKey, password);
                 }
             }
         });
@@ -170,7 +178,7 @@ async function executeRegister(task) {
 /**
  * 将账号添加到数据库
  */
-async function addAccountToStore(task, clientKey) {
+async function addAccountToStore(task, clientKey, password = null) {
     try {
         task.addLog(`正在验证并添加账号...`);
         
@@ -193,6 +201,7 @@ async function addAccountToStore(task, clientKey) {
         await task.store.add({
             name,
             email: accountInfo.email,
+            password,
             clientJwt: clientKey,
             clerkSessionId: accountInfo.sessionId,
             userId: accountInfo.userId,

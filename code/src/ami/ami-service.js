@@ -59,10 +59,14 @@ const AMI_TO_CLI_TOOL = {
 // 本地处理的工具（不转发给 CLI，不断流，daemon 返回占位结果后 AMI 继续）
 // 这些工具是纯元数据操作，不影响文件系统，省掉 AMI 往返可节省约 40% 时间
 const LOCAL_ONLY_TOOLS = new Set([
-    'TodoWrite', 'TodoRead', 'Task', 'TaskOutput',
+    'TodoWrite', 'TodoRead',
     'EnterPlanMode', 'ExitPlanMode',
     'AskQuestion', 'AskUserQuestion',  // AMI 参数格式与 CLI 不兼容，本地处理
 ]);
+
+// Task 子代理工具 → 转换为 Bash 命令发给 CLI
+// 原因：AMI 的 Task 不走 daemon RPC，CLI 的 Task 存在 agent type 大小写不匹配
+const TASK_TOOLS = new Set(['Task', 'TaskOutput']);
 
 /**
  * 生成随机 ID（与 AMI 格式一致）
@@ -166,7 +170,7 @@ class AmiDaemon {
 
         if (method === 'daemon:tool_run' || method === 'daemon:execute_tool') {
             const toolName = input.toolName || '';
-            console.log(`│ 🔧 DAEMON RPC: ${method} tool=${toolName} → 返回占位结果（不实际执行，由 CLI 执行）`);
+            console.log(`│ 🔧 DAEMON RPC: ${method} tool=${toolName} → 返回占位结果（由 CLI 执行）`);
             // 不实际执行工具，返回占位成功结果。CLI 是唯一的工具执行者。
             result = { result: { type: 'success', result: { stdout: '', stderr: '', interrupted: false, isImage: false } } };
         } else {
@@ -791,6 +795,7 @@ export class AmiService {
         let lastFinishReason = 'end_turn'; // 缓冲 finish 事件，只在流结束后发
         let hasYieldedStart = false;
         let earlyFinish = false;    // 遇到 CLI 工具时提前结束
+        let yieldedToolUse = false; // 是否有 tool_use 块真正发给了 CLI
 
         let eventCount = 0;
         let textAccum = '';
@@ -859,11 +864,40 @@ export class AmiService {
 
             // ── tool_use_block：判断是否为 CLI 工具 ──
             if (claudeEvent.type === 'tool_use_block') {
-                // 本地工具：daemon 已返回占位结果，AMI 继续执行，不断流
+                // 本地工具：纯元数据操作，不断流
                 if (LOCAL_ONLY_TOOLS.has(claudeEvent.toolName)) {
-                    console.log(`│ ⚡ 本地处理: ${claudeEvent.toolName}（不断流，AMI 继续）`);
+                    console.log(`│ ⚡ 本地处理: ${claudeEvent.toolName}（不断流）`);
                     continue;
                 }
+
+                // Task 子代理 → 转换为 Bash 命令发给 CLI
+                if (TASK_TOOLS.has(claudeEvent.toolName)) {
+                    const prompt = claudeEvent.toolInput?.prompt || claudeEvent.toolInput?.description || '';
+                    const pathMatch = prompt.match(/(\/(Users|home|tmp)\/[^\s"']+)/);
+                    const targetDir = pathMatch ? pathMatch[1] : (clientCwd || '/tmp');
+                    const bashName = [...cliToolNames].find(n => n.startsWith('Bash')) || 'Bash';
+                    const bashInput = { command: `find ${targetDir} -maxdepth 3 -type f 2>/dev/null | head -100 && echo '---' && ls -la ${targetDir}`, description: `Explore directory: ${targetDir}` };
+                    const idx = blockIndex++;
+                    console.log(`│ → CLI: Task→Bash 转换 index=${idx} dir=${targetDir}`);
+
+                    yield {
+                        type: 'content_block_start',
+                        index: idx,
+                        content_block: { type: 'tool_use', id: claudeEvent.toolId, name: bashName, input: {} },
+                    };
+                    yield {
+                        type: 'content_block_delta',
+                        index: idx,
+                        delta: { type: 'input_json_delta', partial_json: JSON.stringify(bashInput) },
+                    };
+                    yield { type: 'content_block_stop', index: idx };
+
+                    lastFinishReason = 'tool_use';
+                    earlyFinish = true;
+                    yieldedToolUse = true;
+                    break;
+                }
+
                 const isCliTool = cliToolNames.has(claudeEvent.toolName);
                 if (isCliTool) {
                     // CLI 能处理此工具 → 转发 tool_use + 提前断流
@@ -885,10 +919,11 @@ export class AmiService {
 
                     lastFinishReason = 'tool_use';
                     earlyFinish = true;
+                    yieldedToolUse = true;
                     break; // 跳出 SSE 循环
                 } else {
-                    // 非 CLI 工具（如 BrowserExecute）→ daemon 本地处理，忽略
-                    console.log(`│ ⊘ 忽略非 CLI 工具: ${claudeEvent.toolName}`);
+                    // 非 CLI 工具（如 BrowserExecute）→ 忽略
+                    console.log(`│ ⊊ 忽略非 CLI 工具: ${claudeEvent.toolName}`);
                 }
                 continue;
             }
@@ -945,6 +980,12 @@ export class AmiService {
         if (earlyFinish && response.data && typeof response.data.destroy === 'function') {
             console.log(`│ ⚡ 提前断流: destroy SSE 连接`);
             response.data.destroy();
+        }
+
+        // 如果 finish 是 tool_use 但没有 tool_use 块发给 CLI → 改为 end_turn
+        if (lastFinishReason === 'tool_use' && !yieldedToolUse) {
+            console.log(`│ ⚠ tool_use finish 但无 tool_use 块发给 CLI → 改为 end_turn`);
+            lastFinishReason = 'end_turn';
         }
 
         // 发送最终 message_delta（只在流结束后发一次）

@@ -11,7 +11,7 @@ import { KiroAPI } from './kiro/api.js';
 import { KiroAuth } from './kiro/auth.js';
 import { WebSearchService } from './kiro/websearch-service.js';
 import { OrchidsAPI } from './orchids/orchids-service.js';
-import { OrchidsChatService, ORCHIDS_MODELS } from './orchids/orchids-chat-service.js';
+import { ProxyHandler, ORCHIDS_MODELS } from './orchids/orchids-proxy-service.js';
 import { setupOrchidsRoutes } from './orchids/orchids-routes.js';
 import { OrchidsLoadBalancer, getOrchidsLoadBalancer, closeOrchidsLoadBalancer } from './orchids/orchids-loadbalancer.js';
 import { WarpService, WARP_MODELS, refreshAccessToken, isTokenExpired, getEmailFromToken, parseJwtToken } from './warp/warp-service.js';
@@ -131,6 +131,32 @@ let siteSettingsStore = null;
 let pricingStore = null;
 let amiStore = null;
 let handleAmiRequest = null;
+
+// Orchids ProxyHandler 实例缓存（按 credential.id 缓存，避免重复 initialize）
+const _orchidsProxyCache = new Map();
+function getOrchidsProxy(credential) {
+    const id = credential.id;
+    if (_orchidsProxyCache.has(id)) return _orchidsProxyCache.get(id);
+    const handler = new ProxyHandler(credential);
+    _orchidsProxyCache.set(id, handler);
+    return handler;
+}
+// 查找有活跃会话（暂停等待 tool_result）的 ProxyHandler
+function findActiveOrchidsProxy() {
+    for (const [id, handler] of _orchidsProxyCache) {
+        if (handler._activeSession) return { credentialId: id, handler };
+    }
+    return null;
+}
+// 检测请求是否包含 tool_result
+function isToolResultRequest(messages) {
+    if (!messages || messages.length === 0) return false;
+    const lastMsg = messages[messages.length - 1];
+    if (lastMsg.role === 'user' && Array.isArray(lastMsg.content)) {
+        return lastMsg.content.some(b => typeof b === 'object' && b.type === 'tool_result');
+    }
+    return false;
+}
 
 // 凭据 403 错误计数器
 const credential403Counter = new Map();
@@ -2391,6 +2417,30 @@ app.post('/v1/messages', async (req, res) => {
 
             const { messages, max_tokens, stream, system } = req.body;
 
+            // tool_result 快速路由：找到暂停的活跃会话，跳过负载均衡
+            if (isToolResultRequest(messages)) {
+                const active = findActiveOrchidsProxy();
+                if (active) {
+                    console.log(`[${getTimestamp()}] [Orchids] /v1/messages tool_result → 路由到活跃会话 (credential ${active.credentialId})`);
+                    logData.credentialId = active.credentialId;
+                    logData.stream = !!stream;
+                    try {
+                        await active.handler.handleMessages(req, res, req.body);
+                        logData.statusCode = 200;
+                    } catch (error) {
+                        logData.statusCode = 500;
+                        logData.errorMessage = error.message;
+                        if (!res.headersSent) {
+                            res.status(500).json({ error: { type: 'api_error', message: error.message } });
+                        }
+                    } finally {
+                        decrementConcurrent(keyRecord.id, clientIp);
+                        await apiLogStore.create({ ...logData, durationMs: Date.now() - startTime });
+                    }
+                    return;
+                }
+            }
+
             // 使用负载均衡器获取 Orchids 凭证（带锁定机制）
             let orchidsCredential = null;
             if (orchidsLoadBalancer) {
@@ -2417,58 +2467,19 @@ app.post('/v1/messages', async (req, res) => {
             logData.stream = !!stream;
 
             try {
-                const orchidsService = new OrchidsChatService(orchidsCredential);
-                const requestBody = { messages, system, max_tokens };
-
-                if (stream) {
-                    res.setHeader('Content-Type', 'text/event-stream');
-                    res.setHeader('Cache-Control', 'no-cache');
-                    res.setHeader('Connection', 'keep-alive');
-                    disableCompressionForSSE(res);
-                    res.setHeader('X-Accel-Buffering', 'no');
-
-                    let outputTokens = 0;
-                    try {
-                        for await (const event of orchidsService.generateContentStream(model, requestBody)) {
-                            res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
-                            if (event.usage?.output_tokens) {
-                                outputTokens = event.usage.output_tokens;
-                            }
-                        }
-                        logData.outputTokens = outputTokens;
-                        logData.statusCode = 200;
-                        // 记录成功
-                        if (orchidsLoadBalancer) {
-                            orchidsLoadBalancer.scheduleSuccessCount(orchidsCredential.id);
-                        }
-                    } catch (streamError) {
-                        const errorEvent = {
-                            type: 'error',
-                            error: { type: 'api_error', message: streamError.message }
-                        };
-                        res.write(`event: error\ndata: ${JSON.stringify(errorEvent)}\n\n`);
-                        logData.statusCode = 500;
-                        logData.errorMessage = streamError.message;
-                        // 记录失败
-                        if (orchidsLoadBalancer) {
-                            orchidsLoadBalancer.scheduleFailureCount(orchidsCredential.id);
-                        }
-                    }
-                    res.end();
-                } else {
-                    const response = await orchidsService.generateContent(model, requestBody);
-                    logData.outputTokens = response.usage?.output_tokens || 0;
-                    logData.statusCode = 200;
-                    res.json(response);
-                    // 记录成功
-                    if (orchidsLoadBalancer) {
-                        orchidsLoadBalancer.scheduleSuccessCount(orchidsCredential.id);
-                    }
+                const proxyHandler = getOrchidsProxy(orchidsCredential);
+                await proxyHandler.handleMessages(req, res, req.body);
+                logData.statusCode = 200;
+                // 记录成功
+                if (orchidsLoadBalancer) {
+                    orchidsLoadBalancer.scheduleSuccessCount(orchidsCredential.id);
                 }
             } catch (error) {
                 logData.statusCode = 500;
                 logData.errorMessage = error.message;
-                res.status(500).json({ error: { type: 'api_error', message: error.message } });
+                if (!res.headersSent) {
+                    res.status(500).json({ error: { type: 'api_error', message: error.message } });
+                }
                 // 记录失败
                 if (orchidsLoadBalancer) {
                     orchidsLoadBalancer.scheduleFailureCount(orchidsCredential.id);
@@ -3014,6 +3025,30 @@ async function handleOrchidsRequest(req, res) {
 
         const { model, messages, max_tokens, stream, system } = req.body;
 
+        // tool_result 快速路由：找到暂停的活跃会话，跳过负载均衡
+        if (isToolResultRequest(messages)) {
+            const active = findActiveOrchidsProxy();
+            if (active) {
+                console.log(`[${getTimestamp()}] [Orchids] tool_result → 路由到活跃会话 (credential ${active.credentialId})`);
+                logData.credentialId = active.credentialId;
+                logData.stream = !!stream;
+                try {
+                    await active.handler.handleMessages(req, res, req.body);
+                    logData.statusCode = 200;
+                } catch (error) {
+                    logData.statusCode = 500;
+                    logData.errorMessage = error.message;
+                    if (!res.headersSent) {
+                        res.status(500).json({ error: { type: 'api_error', message: error.message } });
+                    }
+                } finally {
+                    if (keyRecord) decrementConcurrent(keyRecord.id, clientIp);
+                    await apiLogStore.create({ ...logData, durationMs: Date.now() - startTime });
+                }
+                return;
+            }
+        }
+
         // 使用负载均衡器选择账号
         const selectAccount = async () => {
             if (orchidsLoadBalancer) {
@@ -3049,36 +3084,14 @@ async function handleOrchidsRequest(req, res) {
         const inputTokens = Math.ceil(JSON.stringify(messages).length / 4);
         logData.inputTokens = inputTokens;
 
-        const requestBody = { messages, system, max_tokens };
+        const parsed = req.body;
 
         // 执行请求（带重试逻辑）
         const executeRequest = async (credential) => {
-            const orchidsService = new OrchidsChatService(credential);
-            
-            if (stream) {
-                res.setHeader('Content-Type', 'text/event-stream');
-                res.setHeader('Cache-Control', 'no-cache');
-                res.setHeader('Connection', 'keep-alive');
-                disableCompressionForSSE(res);
-
-                let outputTokens = 0;
-                for await (const event of orchidsService.generateContentStream(model, requestBody)) {
-                    res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
-                    if (event.usage?.output_tokens) {
-                        outputTokens = event.usage.output_tokens;
-                    }
-                }
-                logData.outputTokens = outputTokens;
-                logData.statusCode = 200;
-                res.end();
-                return { success: true };
-            } else {
-                const response = await orchidsService.generateContent(model, requestBody);
-                logData.outputTokens = response.usage?.output_tokens || 0;
-                logData.statusCode = 200;
-                res.json(response);
-                return { success: true };
-            }
+            const proxyHandler = getOrchidsProxy(credential);
+            await proxyHandler.handleMessages(req, res, parsed);
+            logData.statusCode = 200;
+            return { success: true };
         };
 
         // 主请求循环（带故障转移）

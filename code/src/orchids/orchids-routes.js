@@ -3,7 +3,7 @@
  * 整合自 orchids-api-main 的功能
  */
 import { OrchidsAPI } from './orchids-service.js';
-import { OrchidsChatService, ORCHIDS_MODELS } from './orchids-chat-service.js';
+import { ProxyHandler, ORCHIDS_MODELS } from './orchids-proxy-service.js';
 import { getOrchidsLoadBalancer } from './orchids-loadbalancer.js';
 import { startRegisterTask, getRegisterTask, getAllRegisterTasks, cancelRegisterTask } from './orchids-register.js';
 
@@ -416,7 +416,7 @@ export function setupOrchidsRoutes(app, orchidsStore) {
     // 添加 Orchids 凭证 - 只需输入 clientJwt，自动获取其他信息
     app.post('/api/orchids/credentials', async (req, res) => {
         try {
-            let { name, email, clientJwt, client_cookie, weight, enabled } = req.body;
+            let { name, email, password, clientJwt, client_cookie, weight, enabled } = req.body;
             
             // 兼容 orchids-api-main 的字段名
             const token = clientJwt || client_cookie;
@@ -445,6 +445,7 @@ export function setupOrchidsRoutes(app, orchidsStore) {
             const id = await orchidsStore.add({
                 name: finalName,
                 email: finalEmail,
+                password: password || null,
                 clientJwt: token,
                 clerkSessionId: accountInfo.sessionId,
                 userId: accountInfo.userId,
@@ -549,9 +550,10 @@ export function setupOrchidsRoutes(app, orchidsStore) {
     app.put('/api/orchids/credentials/:id', async (req, res) => {
         try {
             const id = parseInt(req.params.id);
-            const { name, email, clientJwt, weight, enabled } = req.body;
+            const { name, email, password, clientJwt, weight, enabled } = req.body;
             
             const updateData = { name, email, clientJwt };
+            if (password !== undefined) updateData.password = password;
             if (weight !== undefined) {
                 await orchidsStore.updateWeight(id, weight);
             }
@@ -928,36 +930,12 @@ export function setupOrchidsRoutes(app, orchidsStore) {
                 return res.status(400).json({ success: false, error: '缺少 messages 参数' });
             }
 
-            const service = new OrchidsChatService(credential);
-            const requestBody = { messages, system, max_tokens };
-
-            if (stream) {
-                // 流式响应
-                res.setHeader('Content-Type', 'text/event-stream');
-                res.setHeader('Cache-Control', 'no-cache');
-                res.setHeader('Connection', 'keep-alive');
-                res.setHeader('X-Accel-Buffering', 'no');
-
-                try {
-                    for await (const event of service.generateContentStream(model, requestBody)) {
-                        res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
-                    }
-                    res.end();
-                } catch (streamError) {
-                    const errorEvent = {
-                        type: 'error',
-                        error: { type: 'api_error', message: streamError.message }
-                    };
-                    res.write(`event: error\ndata: ${JSON.stringify(errorEvent)}\n\n`);
-                    res.end();
-                }
-            } else {
-                // 非流式响应
-                const response = await service.generateContent(model, requestBody);
-                res.json(response);
-            }
+            const handler = new ProxyHandler(credential);
+            await handler.handleMessages(req, res, req.body);
         } catch (error) {
-            res.status(500).json({ success: false, error: error.message });
+            if (!res.headersSent) {
+                res.status(500).json({ success: false, error: error.message });
+            }
         }
     });
 
@@ -977,11 +955,8 @@ export function setupOrchidsRoutes(app, orchidsStore) {
                 return res.status(400).json({ success: false, error: '缺少 messages 参数' });
             }
 
-            const service = new OrchidsChatService(credential);
-            const requestBody = { messages, system, max_tokens };
-            const response = await service.generateContent(model, requestBody);
-
-            res.json(response);
+            const handler = new ProxyHandler(credential);
+            await handler.handleMessages(req, res, { ...req.body, stream: false });
         } catch (error) {
             res.status(500).json({ success: false, error: error.message });
         }
@@ -1004,34 +979,8 @@ export function setupOrchidsRoutes(app, orchidsStore) {
                 return res.status(400).json({ success: false, error: '缺少 messages 参数' });
             }
 
-            const service = new OrchidsChatService(activeCredential);
-            const requestBody = { messages, system, max_tokens };
-
-            if (stream) {
-                // 流式响应
-                res.setHeader('Content-Type', 'text/event-stream');
-                res.setHeader('Cache-Control', 'no-cache');
-                res.setHeader('Connection', 'keep-alive');
-                res.setHeader('X-Accel-Buffering', 'no');
-
-                try {
-                    for await (const event of service.generateContentStream(model, requestBody)) {
-                        res.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
-                    }
-                    res.end();
-                } catch (streamError) {
-                    const errorEvent = {
-                        type: 'error',
-                        error: { type: 'api_error', message: streamError.message }
-                    };
-                    res.write(`event: error\ndata: ${JSON.stringify(errorEvent)}\n\n`);
-                    res.end();
-                }
-            } else {
-                // 非流式响应
-                const response = await service.generateContent(model, requestBody);
-                res.json(response);
-            }
+            const handler = new ProxyHandler(activeCredential);
+            await handler.handleMessages(req, res, req.body);
         } catch (error) {
             res.status(500).json({ success: false, error: error.message });
         }
