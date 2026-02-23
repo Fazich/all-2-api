@@ -607,6 +607,26 @@ export async function initDatabase() {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
 
+    // 创建兑换码表
+    await pool.execute(`
+        CREATE TABLE IF NOT EXISTS redemption_codes (
+            id INT PRIMARY KEY AUTO_INCREMENT,
+            code VARCHAR(32) NOT NULL UNIQUE,
+            package_id INT NOT NULL,
+            status ENUM('unused', 'used', 'expired', 'disabled') DEFAULT 'unused',
+            redeemed_by_key_id INT,
+            redeemed_at DATETIME,
+            redeemed_ip VARCHAR(45),
+            note TEXT,
+            created_by INT,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            expires_at DATETIME,
+            INDEX idx_code (code),
+            INDEX idx_status (status),
+            INDEX idx_package_id (package_id)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
     return pool;
 }
 
@@ -4728,6 +4748,145 @@ export class ModelMappingStore {
             priority: row.priority,
             createdAt: row.created_at,
             updatedAt: row.updated_at
+        };
+    }
+}
+
+/**
+ * 兑换码管理类
+ */
+export class RedemptionCodeStore {
+    constructor(database) {
+        this.db = database;
+    }
+
+    static async create() {
+        const database = await getDatabase();
+        return new RedemptionCodeStore(database);
+    }
+
+    async generateCodes(packageId, count, createdBy, expiresAt = null, note = null) {
+        const codes = [];
+        for (let i = 0; i < count; i++) {
+            const code = this._generateCode();
+            const [result] = await this.db.execute(`
+                INSERT INTO redemption_codes (code, package_id, created_by, expires_at, note)
+                VALUES (?, ?, ?, ?, ?)
+            `, [code, packageId, createdBy, expiresAt, note]);
+            codes.push({ id: result.insertId, code });
+        }
+        return codes;
+    }
+
+    async getByCode(code) {
+        const [rows] = await this.db.execute('SELECT * FROM redemption_codes WHERE code = ?', [code]);
+        if (rows.length === 0) return null;
+        return this._mapRow(rows[0]);
+    }
+
+    async getAll(options = {}) {
+        const { status, packageId, page = 1, pageSize = 50 } = options;
+        let query = 'SELECT rc.*, p.name as package_name FROM redemption_codes rc LEFT JOIN packages p ON rc.package_id = p.id';
+        const conditions = [];
+        const params = [];
+
+        if (status) {
+            conditions.push('rc.status = ?');
+            params.push(status);
+        }
+        if (packageId) {
+            conditions.push('rc.package_id = ?');
+            params.push(packageId);
+        }
+
+        if (conditions.length > 0) {
+            query += ' WHERE ' + conditions.join(' AND ');
+        }
+
+        query += ' ORDER BY rc.created_at DESC';
+
+        const limit = parseInt(pageSize) || 50;
+        const offset = ((parseInt(page) || 1) - 1) * limit;
+        query += ` LIMIT ${limit} OFFSET ${offset}`;
+
+        const [rows] = await this.db.execute(query, params);
+
+        // 获取总数
+        let countQuery = 'SELECT COUNT(*) as total FROM redemption_codes rc';
+        if (conditions.length > 0) {
+            countQuery += ' WHERE ' + conditions.join(' AND ');
+        }
+        const [countRows] = await this.db.execute(countQuery, params);
+
+        return {
+            items: rows.map(row => this._mapRow(row)),
+            total: countRows[0].total,
+            page: parseInt(page),
+            pageSize: limit
+        };
+    }
+
+    async redeem(code, apiKeyId, ip) {
+        const redemption = await this.getByCode(code);
+        if (!redemption) return { success: false, error: '兑换码不存在' };
+        if (redemption.status !== 'unused') return { success: false, error: '兑换码已被使用或已失效' };
+        if (redemption.expiresAt && new Date(redemption.expiresAt) < new Date()) {
+            await this.db.execute('UPDATE redemption_codes SET status = "expired" WHERE id = ?', [redemption.id]);
+            return { success: false, error: '兑换码已过期' };
+        }
+
+        await this.db.execute(`
+            UPDATE redemption_codes SET status = 'used', redeemed_by_key_id = ?, redeemed_at = NOW(), redeemed_ip = ?
+            WHERE id = ?
+        `, [apiKeyId, ip, redemption.id]);
+
+        return { success: true, redemption };
+    }
+
+    async disable(id) {
+        await this.db.execute('UPDATE redemption_codes SET status = "disabled" WHERE id = ?', [id]);
+    }
+
+    async delete(id) {
+        await this.db.execute('DELETE FROM redemption_codes WHERE id = ?', [id]);
+    }
+
+    async getStats() {
+        const [rows] = await this.db.execute(`
+            SELECT status, COUNT(*) as count FROM redemption_codes GROUP BY status
+        `);
+        const stats = { unused: 0, used: 0, expired: 0, disabled: 0, total: 0 };
+        rows.forEach(row => {
+            stats[row.status] = row.count;
+            stats.total += row.count;
+        });
+        return stats;
+    }
+
+    _generateCode() {
+        const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+        let code = '';
+        for (let i = 0; i < 16; i++) {
+            code += chars.charAt(Math.floor(Math.random() * chars.length));
+            if (i === 3 || i === 7 || i === 11) code += '-';
+        }
+        return code;
+    }
+
+    _mapRow(row) {
+        return {
+            id: row.id,
+            code: row.code,
+            packageId: row.package_id,
+            packageName: row.package_name || null,
+            status: row.status,
+            redeemedByKeyId: row.redeemed_by_key_id,
+            redeemedAt: row.redeemed_at,
+            redeemedIp: row.redeemed_ip,
+            note: row.note,
+            createdBy: row.created_by,
+            createdAt: row.created_at,
+            expiresAt: row.expires_at
         };
     }
 }

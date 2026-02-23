@@ -4,7 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import axios from 'axios';
 import crypto from 'crypto';
-import { CredentialStore, UserStore, ApiKeyStore, ApiLogStore, GeminiCredentialStore, OrchidsCredentialStore, WarpCredentialStore, TrialApplicationStore, SiteSettingsStore, VertexCredentialStore, BedrockCredentialStore, ModelPricingStore, AmiCredentialStore, PackageStore, FullAccountStore, ModelMappingStore, initDatabase } from './db.js';
+import { CredentialStore, UserStore, ApiKeyStore, ApiLogStore, GeminiCredentialStore, OrchidsCredentialStore, WarpCredentialStore, TrialApplicationStore, SiteSettingsStore, VertexCredentialStore, BedrockCredentialStore, ModelPricingStore, AmiCredentialStore, PackageStore, FullAccountStore, ModelMappingStore, RedemptionCodeStore, initDatabase } from './db.js';
 import { KiroClient } from './kiro/client.js';
 import { KiroService } from './kiro/kiro-service.js';
 import { KiroAPI } from './kiro/api.js';
@@ -1344,6 +1344,224 @@ app.post('/api/packages/:id/toggle', authMiddleware, async (req, res) => {
         res.json({ success: true, data: pkg });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// ============ 兑换码管理 API ============
+
+// IP 频率限制存储
+const redeemRateLimits = new Map();
+const REDEEM_RATE_LIMIT = 5; // 每IP每10分钟最多5次
+const REDEEM_RATE_WINDOW = 10 * 60 * 1000; // 10分钟
+
+// 验证码存储
+const captchaStore = new Map();
+
+// 生成简单数学验证码
+app.get('/api/captcha', (req, res) => {
+    const a = Math.floor(Math.random() * 20) + 1;
+    const b = Math.floor(Math.random() * 20) + 1;
+    const id = crypto.randomBytes(16).toString('hex');
+    const answer = a + b;
+    captchaStore.set(id, { answer, createdAt: Date.now() });
+    // 5分钟后清理
+    setTimeout(() => captchaStore.delete(id), 5 * 60 * 1000);
+    res.json({ success: true, data: { id, question: `${a} + ${b} = ?` } });
+});
+
+// 管理接口：获取兑换码列表
+app.get('/api/redemption-codes', authMiddleware, async (req, res) => {
+    try {
+        const store = await RedemptionCodeStore.create();
+        const { status, packageId, page, pageSize } = req.query;
+        const result = await store.getAll({ status, packageId, page, pageSize });
+        res.json({ success: true, data: result });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// 管理接口：获取兑换码统计
+app.get('/api/redemption-codes/stats', authMiddleware, async (req, res) => {
+    try {
+        const store = await RedemptionCodeStore.create();
+        const stats = await store.getStats();
+        res.json({ success: true, data: stats });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// 管理接口：批量生成兑换码
+app.post('/api/redemption-codes/generate', authMiddleware, async (req, res) => {
+    try {
+        const { packageId, count, expiresAt, note } = req.body;
+        if (!packageId || !count || count < 1 || count > 100) {
+            return res.status(400).json({ success: false, error: '请选择套餐并指定生成数量(1-100)' });
+        }
+        const pkgStore = await PackageStore.create();
+        const pkg = await pkgStore.getById(parseInt(packageId));
+        if (!pkg) {
+            return res.status(404).json({ success: false, error: '套餐不存在' });
+        }
+        const store = await RedemptionCodeStore.create();
+        const codes = await store.generateCodes(parseInt(packageId), parseInt(count), req.userId, expiresAt || null, note || null);
+        res.json({ success: true, data: codes });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// 管理接口：禁用兑换码
+app.post('/api/redemption-codes/:id/disable', authMiddleware, async (req, res) => {
+    try {
+        const store = await RedemptionCodeStore.create();
+        await store.disable(parseInt(req.params.id));
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// 管理接口：删除兑换码
+app.delete('/api/redemption-codes/:id', authMiddleware, async (req, res) => {
+    try {
+        const store = await RedemptionCodeStore.create();
+        await store.delete(parseInt(req.params.id));
+        res.json({ success: true });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// 公开接口：兑换码兑换（含IP限制+验证码）
+app.post('/api/redeem', async (req, res) => {
+    try {
+        const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip;
+        const { code, captchaId, captchaAnswer, existingApiKey } = req.body;
+
+        // 1. IP频率限制
+        const now = Date.now();
+        const ipRecord = redeemRateLimits.get(ip) || { count: 0, resetAt: now + REDEEM_RATE_WINDOW };
+        if (now > ipRecord.resetAt) {
+            ipRecord.count = 0;
+            ipRecord.resetAt = now + REDEEM_RATE_WINDOW;
+        }
+        if (ipRecord.count >= REDEEM_RATE_LIMIT) {
+            return res.status(429).json({ success: false, error: '请求过于频繁，请10分钟后再试' });
+        }
+        ipRecord.count++;
+        redeemRateLimits.set(ip, ipRecord);
+
+        // 2. 验证码校验
+        if (!captchaId || !captchaAnswer) {
+            return res.status(400).json({ success: false, error: '请完成验证码' });
+        }
+        const captcha = captchaStore.get(captchaId);
+        if (!captcha) {
+            return res.status(400).json({ success: false, error: '验证码已过期，请刷新' });
+        }
+        if (parseInt(captchaAnswer) !== captcha.answer) {
+            captchaStore.delete(captchaId);
+            return res.status(400).json({ success: false, error: '验证码错误' });
+        }
+        captchaStore.delete(captchaId);
+
+        // 3. 查询兑换码
+        if (!code || !code.trim()) {
+            return res.status(400).json({ success: false, error: '请输入兑换码' });
+        }
+        const rcStore = await RedemptionCodeStore.create();
+        const redemption = await rcStore.getByCode(code.trim().toUpperCase());
+        if (!redemption) {
+            return res.status(404).json({ success: false, error: '兑换码不存在' });
+        }
+        if (redemption.status !== 'unused') {
+            return res.status(400).json({ success: false, error: '兑换码已被使用或已失效' });
+        }
+        if (redemption.expiresAt && new Date(redemption.expiresAt) < new Date()) {
+            await rcStore.disable(redemption.id);
+            return res.status(400).json({ success: false, error: '兑换码已过期' });
+        }
+
+        // 4. 获取套餐信息
+        const pkgStore = await PackageStore.create();
+        const pkg = await pkgStore.getById(redemption.packageId);
+        if (!pkg) {
+            return res.status(500).json({ success: false, error: '关联套餐不存在' });
+        }
+
+        let targetKeyId;
+
+        if (existingApiKey && existingApiKey.trim()) {
+            // 5a. 充值到已有 API Key
+            const hash = crypto.createHash('sha256').update(existingApiKey.trim()).digest('hex');
+            const existingKey = await apiKeyStore.getByKeyHash(hash);
+            if (!existingKey) {
+                return res.status(404).json({ success: false, error: 'API Key 不存在' });
+            }
+            targetKeyId = existingKey.id;
+
+            // 叠加限制
+            const newLimits = {
+                dailyLimit: (existingKey.dailyLimit || 0) + (pkg.dailyLimit || 0),
+                monthlyLimit: (existingKey.monthlyLimit || 0) + (pkg.monthlyLimit || 0),
+                totalLimit: (existingKey.totalLimit || 0) + (pkg.totalLimit || 0),
+                concurrentLimit: Math.max(existingKey.concurrentLimit || 0, pkg.concurrentLimit || 0),
+                rateLimit: Math.max(existingKey.rateLimit || 0, pkg.rateLimit || 0),
+                dailyCostLimit: (parseFloat(existingKey.dailyCostLimit) || 0) + (parseFloat(pkg.dailyCostLimit) || 0),
+                monthlyCostLimit: (parseFloat(existingKey.monthlyCostLimit) || 0) + (parseFloat(pkg.monthlyCostLimit) || 0),
+                totalCostLimit: (parseFloat(existingKey.totalCostLimit) || 0) + (parseFloat(pkg.totalCostLimit) || 0),
+                expiresInDays: (existingKey.expiresInDays || 0) + (pkg.expiresInDays || 0)
+            };
+            await apiKeyStore.updateLimits(targetKeyId, newLimits);
+
+            // 确保激活
+            if (!existingKey.isActive) {
+                await apiKeyStore.enable(targetKeyId);
+            }
+        } else {
+            // 5b. 创建新 API Key
+            const { key, hash, prefix } = generateApiKey();
+            targetKeyId = await apiKeyStore.create(0, `兑换-${pkg.name}`, key, hash, prefix);
+
+            // 设置套餐限制
+            await apiKeyStore.updateLimits(targetKeyId, {
+                dailyLimit: pkg.dailyLimit || 0,
+                monthlyLimit: pkg.monthlyLimit || 0,
+                totalLimit: pkg.totalLimit || 0,
+                concurrentLimit: pkg.concurrentLimit || 0,
+                rateLimit: pkg.rateLimit || 0,
+                dailyCostLimit: parseFloat(pkg.dailyCostLimit) || 0,
+                monthlyCostLimit: parseFloat(pkg.monthlyCostLimit) || 0,
+                totalCostLimit: parseFloat(pkg.totalCostLimit) || 0,
+                expiresInDays: pkg.expiresInDays || 0
+            });
+        }
+
+        // 6. 标记兑换码已使用
+        await rcStore.redeem(code.trim().toUpperCase(), targetKeyId, ip);
+
+        // 7. 返回结果
+        const resultKey = await apiKeyStore.getById(targetKeyId);
+        res.json({
+            success: true,
+            data: {
+                apiKey: existingApiKey ? undefined : resultKey.keyValue,
+                keyId: targetKeyId,
+                packageName: pkg.name,
+                isRecharge: !!existingApiKey,
+                limits: {
+                    dailyLimit: resultKey.dailyLimit,
+                    monthlyLimit: resultKey.monthlyLimit,
+                    totalCostLimit: resultKey.totalCostLimit,
+                    expiresInDays: resultKey.expiresInDays
+                }
+            }
+        });
+    } catch (error) {
+        console.error('Redeem error:', error);
+        res.status(500).json({ success: false, error: '兑换失败，请稍后重试' });
     }
 });
 

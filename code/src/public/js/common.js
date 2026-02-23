@@ -300,6 +300,7 @@ function navigateTo(page) {
         'error-accounts': '/pages/error-accounts.html',
         'api-keys': '/pages/api-keys.html',
         'packages': '/pages/packages.html',
+        'redemption-codes': '/pages/redemption-codes.html',
         'usage': '/pages/usage.html',
         'ranking': '/pages/ranking.html',
         'logs': '/pages/logs.html',
@@ -477,6 +478,14 @@ function getSidebarHTML(stats = { total: 0, active: 0, error: 0 }) {
                             <line x1="9" y1="21" x2="9" y2="9"/>
                         </svg>
                         套餐管理
+                    </a>
+                    <a href="#" class="nav-item nav-subitem" data-page="redemption-codes">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M20 12V8H6a2 2 0 0 1-2-2c0-1.1.9-2 2-2h12v4"/>
+                            <path d="M4 6v12c0 1.1.9 2 2 2h14v-4"/>
+                            <path d="M18 12a2 2 0 0 0-2 2c0 1.1.9 2 2 2h4v-4h-4z"/>
+                        </svg>
+                        兑换码管理
                     </a>
                     <a href="#" class="nav-item nav-subitem" data-page="usage">
                         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
