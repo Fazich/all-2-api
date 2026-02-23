@@ -53,15 +53,7 @@ function updateSiteSettingsUI() {
     const versionInfo = document.querySelector('.version-info');
     if (versionInfo) versionInfo.textContent = `${settings.siteName} Manager v1.0.0`;
 
-    // 更新导航中的账号文字
-    const kiroNavItem = document.querySelector('.nav-item[data-page="accounts"]');
-    if (kiroNavItem) {
-        const badge = kiroNavItem.querySelector('.nav-badge');
-        const badgeHTML = badge ? badge.outerHTML : '';
-        const svgIcon = kiroNavItem.querySelector('svg');
-        const svgHTML = svgIcon ? svgIcon.outerHTML : '';
-        kiroNavItem.innerHTML = `${svgHTML} ${settings.siteName} 账号 ${badgeHTML}`;
-    }
+    // Kiro 账号菜单项固定名称，不随 siteName 变化
 
     // 更新页面副标题中的 "Kiro"
     const pageSubtitle = document.querySelector('.page-subtitle');
@@ -358,7 +350,7 @@ function getSidebarHTML(stats = { total: 0, active: 0, error: 0 }) {
                             <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
                             <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
                         </svg>
-                        ${settings.siteName} 账号
+                        Kiro 账号
                         <span class="nav-badge" id="nav-accounts-count">${stats.total}</span>
                     </a>
                     <a href="#" class="nav-item nav-subitem" data-page="gemini">
