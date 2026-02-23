@@ -59,6 +59,10 @@ export function createAmiMessagesHandler(amiStore, verifyApiKey) {
                 });
             }
 
+            // 记录 API Key 信息用于计费
+            logData.apiKeyId = keyRecord.id;
+            logData.apiKeyPrefix = keyRecord.keyPrefix;
+
             let { model, messages, stream = true, system, max_tokens, temperature, tools } = req.body;
 
             // 使用 DB 层负载均衡选取凭据（按 use_count 升序 + 随机）

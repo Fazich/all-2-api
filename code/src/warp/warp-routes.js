@@ -102,6 +102,14 @@ export async function setupWarpRoutes(app, warpStore, warpService, apiKeyStore) 
                     continue;
                 }
                 
+                // 检查是否是 400 会话状态错误（换凭证重试）
+                if (error.message && error.message.includes('400') && error.message.includes('conversation')) {
+                    console.log(`  <- [400] credential #${credential.id} conversation error, trying next...`);
+                    await warpStore.incrementErrorCount(credential.id, error.message).catch(() => {});
+                    await new Promise(resolve => setTimeout(resolve, RETRY_CONFIG.retryDelay));
+                    continue;
+                }
+                
                 // 其他错误直接抛出
                 throw error;
             }
