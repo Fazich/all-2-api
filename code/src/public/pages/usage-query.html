@@ -65,6 +65,146 @@
             padding: 40px 60px;
             width: 100%;
         }
+        .top-row {
+            display: flex;
+            gap: 24px;
+            margin-bottom: 32px;
+            align-items: stretch;
+        }
+        .top-row .query-section {
+            flex: 1;
+            margin-bottom: 0;
+        }
+        .redeem-sidebar {
+            width: 360px;
+            flex-shrink: 0;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+        .redeem-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-lg);
+            padding: 24px;
+            flex: 1;
+        }
+        .redeem-card-title {
+            font-size: 16px;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .redeem-card-title svg {
+            width: 20px;
+            height: 20px;
+            color: var(--accent-primary);
+        }
+        .redeem-card-desc {
+            font-size: 12px;
+            color: var(--text-muted);
+            margin-bottom: 16px;
+        }
+        .redeem-card .r-input {
+            width: 100%;
+            padding: 10px 12px;
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            color: var(--text-primary);
+            font-size: 13px;
+            margin-bottom: 10px;
+            box-sizing: border-box;
+            transition: all var(--transition-fast);
+        }
+        .redeem-card .r-input:focus {
+            outline: none;
+            border-color: var(--accent-primary);
+            box-shadow: 0 0 0 3px var(--accent-primary-glow);
+        }
+        .redeem-card .r-input.code-input {
+            font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+            font-size: 14px;
+            letter-spacing: 1px;
+            text-transform: uppercase;
+        }
+        .captcha-row {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 10px;
+            align-items: center;
+        }
+        .captcha-question {
+            background: var(--bg-tertiary);
+            border: 1px solid var(--border-color);
+            border-radius: var(--radius-md);
+            padding: 10px 14px;
+            font-size: 15px;
+            font-weight: 600;
+            color: var(--text-primary);
+            text-align: center;
+            min-width: 100px;
+            cursor: pointer;
+            user-select: none;
+            white-space: nowrap;
+        }
+        .captcha-question:hover {
+            background: var(--bg-elevated);
+        }
+        .captcha-row .r-input {
+            flex: 1;
+            margin-bottom: 0;
+        }
+        .redeem-card .r-btn {
+            width: 100%;
+            padding: 10px;
+            background: linear-gradient(135deg, var(--accent-primary), var(--accent-purple));
+            color: white;
+            border: none;
+            border-radius: var(--radius-md);
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all var(--transition-fast);
+        }
+        .redeem-card .r-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 16px var(--accent-primary-glow);
+        }
+        .redeem-card .r-btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .redeem-result {
+            display: none;
+            margin-top: 12px;
+            padding: 12px;
+            border-radius: var(--radius-md);
+            font-size: 13px;
+        }
+        .redeem-result.success {
+            display: block;
+            background: var(--accent-success-bg);
+            color: var(--accent-success);
+        }
+        .redeem-result.error {
+            display: block;
+            background: var(--accent-danger-bg);
+            color: var(--accent-danger);
+        }
+        .redeem-result .result-key {
+            font-family: monospace;
+            word-break: break-all;
+            margin-top: 6px;
+            padding: 8px;
+            background: rgba(0,0,0,0.15);
+            border-radius: 4px;
+            cursor: pointer;
+        }
         .query-section {
             background: var(--bg-card);
             border: 1px solid var(--border-color);
@@ -372,6 +512,18 @@
         .limit-value.danger {
             color: var(--accent-danger);
         }
+        @media (max-width: 1200px) {
+            .top-row {
+                flex-direction: column;
+            }
+            .redeem-sidebar {
+                width: 100%;
+                flex-direction: row;
+            }
+            .redeem-sidebar .redeem-card {
+                flex: 1;
+            }
+        }
         @media (max-width: 1024px) {
             .stats-grid {
                 grid-template-columns: repeat(2, 1fr);
@@ -390,38 +542,18 @@
             .limits-grid {
                 grid-template-columns: repeat(2, 1fr);
             }
+            .redeem-sidebar {
+                flex-direction: column;
+            }
         }
     </style>
 </head>
 <body>
     <div class="public-page">
-        <header class="public-header">
-            <div class="public-logo">
-                <div class="public-logo-icon" id="logo-icon">K</div>
-                <span class="public-logo-text" id="logo-text">Kiro API</span>
-            </div>
-            <nav class="public-nav">
-                <a href="/pages/usage-query.html" class="active">用量查询</a>
-                <a href="/pages/trial-apply.html">试用申请</a>
-                <a href="/pages/docs.html">接入教程</a>
-                <a href="/login.html">后台登录</a>
-            </nav>
-        </header>
+        <script src="/js/public-header.js"></script>
+        <script>renderPublicHeader('usage-query');</script>
 
         <main class="public-content">
-            <div class="query-section">
-                <h1 class="query-title">API 用量查询</h1>
-                <p class="query-subtitle">输入您的 API 密钥查询使用记录和费用统计</p>
-                <form class="query-form" id="query-form">
-                    <div class="query-input-group">
-                        <label for="api-key">API 密钥</label>
-                        <input type="text" id="api-key" class="query-input" placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" autocomplete="off">
-                    </div>
-                    <button type="submit" class="query-btn" id="query-btn">查询用量</button>
-                </form>
-                <div class="error-message" id="error-message"></div>
-            </div>
-
             <div class="results-section" id="results-section">
                 <div class="results-header">
                     <h2 class="results-title">用量统计</h2>
@@ -472,6 +604,25 @@
                         <div class="stat-value" id="total-output-tokens">0</div>
                         <div class="stat-label">输出 Tokens</div>
                     </div>
+                    <div class="stat-card" id="remaining-days-card" style="display: none;">
+                        <div class="stat-icon">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="10"/>
+                                <polyline points="12 6 12 12 16 14"/>
+                            </svg>
+                        </div>
+                        <div class="stat-value" id="remaining-days">-</div>
+                        <div class="stat-label">剩余天数</div>
+                    </div>
+                    <div class="stat-card" id="remaining-cost-card" style="display: none;">
+                        <div class="stat-icon success">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/>
+                            </svg>
+                        </div>
+                        <div class="stat-value" id="remaining-cost">-</div>
+                        <div class="stat-label">剩余金额</div>
+                    </div>
                 </div>
 
                 <div class="limits-info" id="limits-info" style="display: none;">
@@ -515,6 +666,97 @@
                     </table>
                 </div>
             </div>
+
+            <div class="top-row">
+                <div class="query-section">
+                    <h1 class="query-title">API 用量查询</h1>
+                    <p class="query-subtitle">输入您的 API 密钥查询使用记录和费用统计</p>
+                    <form class="query-form" id="query-form">
+                        <div class="query-input-group">
+                            <label for="api-key">API 密钥</label>
+                            <input type="text" id="api-key" class="query-input" placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx" autocomplete="off">
+                        </div>
+                        <button type="submit" class="query-btn" id="query-btn">查询用量</button>
+                    </form>
+                    <div class="error-message" id="error-message"></div>
+
+                    <div style="border-top: 1px solid var(--border-color); margin-top: 24px; padding-top: 20px;">
+                        <h2 style="font-size: 18px; font-weight: 700; color: var(--text-primary); margin-bottom: 6px;">邮箱查询</h2>
+                        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 16px;">根据兑换时绑定的邮箱查询 API Key</p>
+                        <div class="query-form" id="email-query-form" style="margin-bottom: 10px;">
+                            <div class="query-input-group">
+                                <label for="query-email">邮箱</label>
+                                <input type="email" id="query-email" class="query-input" placeholder="your@email.com" autocomplete="off" style="font-family: inherit;">
+                            </div>
+                            <button type="button" class="query-btn" id="email-query-btn">查询</button>
+                        </div>
+                        <div class="error-message" id="email-error"></div>
+                        <div id="email-results" style="display: none; margin-top: 16px;"></div>
+                    </div>
+
+                    <div style="border-top: 1px solid var(--border-color); margin-top: 24px; padding-top: 20px;">
+                        <h2 style="font-size: 18px; font-weight: 700; color: var(--text-primary); margin-bottom: 12px;">兑换码使用说明</h2>
+                        <div style="display: flex; gap: 20px; align-items: flex-start;">
+                            <div style="flex: 1; font-size: 13px; color: var(--text-secondary); line-height: 1.8;">
+                                <p style="margin: 0 0 8px;">通过兑换码获取或充值 API Key：</p>
+                                <ol style="margin: 0 0 12px; padding-left: 18px;">
+                                    <li>右侧有两个兑换卡片</li>
+                                    <li><strong>新建 API Key</strong>：输入兑换码 + 邮箱（可选），生成新的 API Key</li>
+                                    <li><strong>充值已有 Key</strong>：输入兑换码 + 已有 API Key，叠加套餐额度</li>
+                                    <li>填写邮箱后，兑换成功会自动发送 Key 到邮箱</li>
+                                    <li>也可通过上方邮箱查询之前兑换的 API Key</li>
+                                </ol>
+                            </div>
+                            <div style="flex-shrink: 0; text-align: center; background: linear-gradient(135deg, rgba(99,102,241,0.1), rgba(168,85,247,0.1)); border: 1px solid rgba(99,102,241,0.2); border-radius: 8px; padding: 14px 16px;">
+                                <div style="font-size: 14px; color: var(--accent-primary); font-weight: 600;">进群找群主领取 10 刀 24 小时体验</div>
+                                <img src="/static/qr.jpg" alt="扫码进群" style="margin-top: 12px; max-width: 180px; border-radius: 8px;">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="redeem-sidebar">
+                    <!-- 新建 API Key 卡片 -->
+                    <div class="redeem-card" id="card-new">
+                        <div class="redeem-card-title">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>
+                            </svg>
+                            新建 API Key
+                        </div>
+                        <p class="redeem-card-desc">输入兑换码生成新的 API Key</p>
+                        <input type="text" class="r-input code-input" id="new-code" placeholder="XXXX-XXXX-XXXX-XXXX" maxlength="19">
+                        <input type="email" class="r-input" id="new-email" placeholder="邮箱（可选，接收 Key 通知）">
+                        <div class="captcha-row">
+                            <div class="captcha-question" id="new-captcha-q" title="点击刷新">加载中...</div>
+                            <input type="text" class="r-input" id="new-captcha-a" placeholder="答案">
+                        </div>
+                        <button class="r-btn" id="new-redeem-btn">兑换</button>
+                        <div class="redeem-result" id="new-result"></div>
+                    </div>
+
+                    <!-- 充值卡片 -->
+                    <div class="redeem-card" id="card-recharge">
+                        <div class="redeem-card-title">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M20 12V8H6a2 2 0 0 1-2-2c0-1.1.9-2 2-2h12v4"/>
+                                <path d="M4 6v12c0 1.1.9 2 2 2h14v-4"/>
+                                <path d="M18 12a2 2 0 0 0-2 2c0 1.1.9 2 2 2h4v-4h-4z"/>
+                            </svg>
+                            充值已有 Key
+                        </div>
+                        <p class="redeem-card-desc">为已有的 API Key 充值套餐</p>
+                        <input type="text" class="r-input code-input" id="rc-code" placeholder="XXXX-XXXX-XXXX-XXXX" maxlength="19">
+                        <input type="text" class="r-input" id="rc-apikey" placeholder="输入已有的 API Key">
+                        <div class="captcha-row">
+                            <div class="captcha-question" id="rc-captcha-q" title="点击刷新">加载中...</div>
+                            <input type="text" class="r-input" id="rc-captcha-a" placeholder="答案">
+                        </div>
+                        <button class="r-btn" id="rc-redeem-btn">充值</button>
+                        <div class="redeem-result" id="rc-result"></div>
+                    </div>
+                </div>
+            </div>
         </main>
     </div>
 
@@ -524,33 +766,178 @@
 
     <script src="/js/usage-query.js"></script>
     <script>
-        // 加载站点设置
-        (async function() {
-            // 先从缓存加载（避免闪烁）
-            const cached = localStorage.getItem('siteSettings');
-            if (cached) {
-                try {
-                    const settings = JSON.parse(cached);
-                    document.getElementById('logo-icon').textContent = settings.siteLogo || 'K';
-                    document.getElementById('logo-text').textContent = `${settings.siteName || 'Kiro'} API`;
-                    document.title = `API 用量查询 - ${settings.siteName || 'Kiro'} API`;
-                } catch (e) {}
-            }
-            // 再从服务器获取最新
+    // ============ 兑换卡片逻辑 ============
+    (function() {
+        let newCaptchaId = '';
+        let rcCaptchaId = '';
+
+        document.addEventListener('DOMContentLoaded', function() {
+            loadCaptcha('new');
+            loadCaptcha('rc');
+            document.getElementById('new-captcha-q').addEventListener('click', function() { loadCaptcha('new'); });
+            document.getElementById('rc-captcha-q').addEventListener('click', function() { loadCaptcha('rc'); });
+            document.getElementById('new-redeem-btn').addEventListener('click', function() { doRedeem('new'); });
+            document.getElementById('rc-redeem-btn').addEventListener('click', function() { doRedeem('rc'); });
+            document.getElementById('email-query-btn').addEventListener('click', doEmailQuery);
+            // Enter key support
+            ['new-code', 'new-email', 'new-captcha-a'].forEach(function(id) {
+                document.getElementById(id).addEventListener('keydown', function(e) { if (e.key === 'Enter') doRedeem('new'); });
+            });
+            ['rc-code', 'rc-apikey', 'rc-captcha-a'].forEach(function(id) {
+                document.getElementById(id).addEventListener('keydown', function(e) { if (e.key === 'Enter') doRedeem('rc'); });
+            });
+            document.getElementById('query-email').addEventListener('keydown', function(e) { if (e.key === 'Enter') doEmailQuery(); });
+        });
+
+        async function loadCaptcha(prefix) {
+            var qEl = document.getElementById(prefix + '-captcha-q');
             try {
-                const res = await fetch('/api/site-settings');
-                const data = await res.json();
-                if (data.success && data.data) {
-                    const settings = data.data;
-                    localStorage.setItem('siteSettings', JSON.stringify(settings));
-                    document.getElementById('logo-icon').textContent = settings.siteLogo || 'K';
-                    document.getElementById('logo-text').textContent = `${settings.siteName || 'Kiro'} API`;
-                    document.title = `API 用量查询 - ${settings.siteName || 'Kiro'} API`;
+                var res = await fetch('/api/captcha');
+                var result = await res.json();
+                if (result.success) {
+                    if (prefix === 'new') newCaptchaId = result.data.id;
+                    else rcCaptchaId = result.data.id;
+                    qEl.textContent = result.data.question;
                 }
             } catch (e) {
-                console.error('Load site settings error:', e);
+                qEl.textContent = '点击重试';
             }
-        })();
+            document.getElementById(prefix + '-captcha-a').value = '';
+        }
+
+        async function doRedeem(prefix) {
+            var code = document.getElementById(prefix + '-code').value.trim();
+            var answer = document.getElementById(prefix + '-captcha-a').value.trim();
+            var captchaId = prefix === 'new' ? newCaptchaId : rcCaptchaId;
+            var existingApiKey = prefix === 'rc' ? document.getElementById('rc-apikey').value.trim() : '';
+            var resultEl = document.getElementById(prefix + '-result');
+            var btn = document.getElementById(prefix + '-redeem-btn');
+
+            resultEl.className = 'redeem-result';
+            resultEl.innerHTML = '';
+
+            if (!code) { showCardError(resultEl, '请输入兑换码'); return; }
+            if (!answer) { showCardError(resultEl, '请输入验证码答案'); return; }
+            if (prefix === 'rc' && !existingApiKey) { showCardError(resultEl, '请输入已有的 API Key'); return; }
+
+            btn.disabled = true;
+            btn.textContent = prefix === 'new' ? '兑换中...' : '充值中...';
+
+            try {
+                var body = { code: code, captchaId: captchaId, captchaAnswer: answer };
+                if (existingApiKey) body.existingApiKey = existingApiKey;
+                if (prefix === 'new') {
+                    var emailVal = document.getElementById('new-email').value.trim();
+                    if (emailVal) body.email = emailVal;
+                }
+
+                var res = await fetch('/api/redeem', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                var result = await res.json();
+
+                if (result.success) {
+                    var data = result.data;
+                    var html = '';
+                    if (data.isRecharge) {
+                        html = '<strong>充值成功!</strong><br>套餐: ' + data.packageName;
+                    } else {
+                        html = '<strong>兑换成功!</strong><br>套餐: ' + data.packageName +
+                            '<div class="result-key" onclick="navigator.clipboard.writeText(this.textContent).then(function(){alert(\'已复制\')})">' + data.apiKey + '</div>' +
+                            '<small>点击上方复制 API Key</small>';
+                    }
+                    var limits = data.limits || {};
+                    var parts = [];
+                    if (limits.dailyLimit > 0) parts.push('日限' + limits.dailyLimit + '次');
+                    if (limits.monthlyLimit > 0) parts.push('月限' + limits.monthlyLimit + '次');
+                    if (limits.totalCostLimit > 0) parts.push('$' + limits.totalCostLimit);
+                    if (limits.expiresInDays > 0) parts.push(limits.expiresInDays + '天');
+                    if (parts.length) html += '<br><small>' + parts.join(' | ') + '</small>';
+
+                    resultEl.className = 'redeem-result success';
+                    resultEl.innerHTML = html;
+                    // 清空输入
+                    document.getElementById(prefix + '-code').value = '';
+                    document.getElementById(prefix + '-captcha-a').value = '';
+                } else {
+                    showCardError(resultEl, result.error || '操作失败');
+                }
+            } catch (e) {
+                showCardError(resultEl, '网络错误，请重试');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = prefix === 'new' ? '兑换' : '充值';
+                loadCaptcha(prefix);
+            }
+        }
+
+        function showCardError(el, msg) {
+            el.className = 'redeem-result error';
+            el.textContent = msg;
+        }
+
+        async function doEmailQuery() {
+            var email = document.getElementById('query-email').value.trim();
+            var errEl = document.getElementById('email-error');
+            var resultsEl = document.getElementById('email-results');
+
+            errEl.className = 'error-message';
+            errEl.textContent = '';
+            resultsEl.style.display = 'none';
+
+            if (!email) { errEl.className = 'error-message active'; errEl.textContent = '请输入邮箱'; return; }
+
+            var btn = document.getElementById('email-query-btn');
+            btn.disabled = true;
+            btn.textContent = '查询中...';
+
+            try {
+                var res = await fetch('/api/query-by-email?email=' + encodeURIComponent(email));
+                var result = await res.json();
+
+                if (result.success) {
+                    if (result.data.length === 0) {
+                        errEl.className = 'error-message active';
+                        errEl.textContent = '该邮箱下没有找到 API Key';
+                    } else {
+                        resultsEl.style.display = 'block';
+                        resultsEl.innerHTML = result.data.map(function(k) {
+                            var status = k.isActive ? '<span style="color:var(--accent-success);">正常</span>' : '<span style="color:var(--accent-danger);">已禁用</span>';
+                            var expired = '';
+                            if (k.expiresAt && new Date(k.expiresAt) < new Date()) {
+                                expired = ' <span style="color:var(--accent-warning);">(已过期)</span>';
+                            }
+                            var limits = [];
+                            if (k.dailyLimit > 0) limits.push('日限' + k.dailyLimit);
+                            if (k.monthlyLimit > 0) limits.push('月限' + k.monthlyLimit);
+                            if (k.totalCostLimit > 0) limits.push('$' + k.totalCostLimit);
+                            if (k.expiresInDays > 0) limits.push(k.expiresInDays + '天');
+
+                            return '<div style="background:var(--bg-tertiary);border:1px solid var(--border-color);border-radius:8px;padding:14px;margin-bottom:10px;">' +
+                                '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">' +
+                                '<span style="font-size:13px;color:var(--text-muted);">' + k.name + '</span>' +
+                                '<span style="font-size:12px;">' + status + expired + '</span>' +
+                                '</div>' +
+                                '<div style="font-family:monospace;font-size:13px;color:var(--accent-primary);word-break:break-all;padding:8px;background:var(--bg-primary);border-radius:4px;cursor:pointer;" onclick="navigator.clipboard.writeText(this.textContent).then(function(){alert(\'已复制\')})" title="点击复制">' + k.keyValue + '</div>' +
+                                (limits.length ? '<div style="font-size:11px;color:var(--text-muted);margin-top:6px;">' + limits.join(' | ') + '</div>' : '') +
+                                '</div>';
+                        }).join('');
+                    }
+                } else {
+                    errEl.className = 'error-message active';
+                    errEl.textContent = result.error || '查询失败';
+                }
+            } catch (e) {
+                errEl.className = 'error-message active';
+                errEl.textContent = '网络错误，请重试';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '查询';
+            }
+        }
+    })();
     </script>
 </body>
 </html>

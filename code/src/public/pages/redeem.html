@@ -10,9 +10,60 @@
     <link rel="stylesheet" href="/css/common.css">
     <link rel="stylesheet" href="/css/styles.css">
     <style>
+        .public-page {
+            min-height: 100vh;
+            background: var(--bg-primary);
+            display: flex;
+            flex-direction: column;
+        }
+        .public-header {
+            background: var(--bg-secondary);
+            border-bottom: 1px solid var(--border-color);
+            padding: 20px 40px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .public-logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .public-logo-icon {
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, var(--accent-primary) 0%, var(--accent-purple) 100%);
+            border-radius: var(--radius-md);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 18px;
+            color: white;
+        }
+        .public-logo-text {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+        .public-nav {
+            display: flex;
+            gap: 24px;
+        }
+        .public-nav a {
+            color: var(--text-secondary);
+            text-decoration: none;
+            font-size: 14px;
+            font-weight: 500;
+            transition: color var(--transition-fast);
+        }
+        .public-nav a:hover,
+        .public-nav a.active {
+            color: var(--text-primary);
+        }
         .redeem-container {
             max-width: 480px;
-            margin: 60px auto;
+            margin: 40px auto;
             padding: 0 24px;
         }
         .redeem-card {
@@ -151,6 +202,10 @@
     </style>
 </head>
 <body>
+    <div class="public-page">
+        <script src="/js/public-header.js"></script>
+        <script>renderPublicHeader('redeem');</script>
+
     <div class="redeem-container">
         <div class="redeem-card">
             <!-- 兑换表单 -->
@@ -205,6 +260,7 @@
     </div>
 
     <div id="toast-container" class="toast-container"></div>
+    </div><!-- /.public-page -->
 
     <script>
         let captchaId = '';

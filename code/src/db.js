@@ -107,7 +107,9 @@ export async function initDatabase() {
             monthly_cost_limit DECIMAL(10,2) DEFAULT 0,
             total_cost_limit DECIMAL(10,2) DEFAULT 0,
             expires_in_days INT DEFAULT 0,
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            email VARCHAR(255) DEFAULT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+            INDEX idx_email (email)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
 
@@ -607,6 +609,14 @@ export async function initDatabase() {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
 
+    // 为已有 api_keys 表添加 email 列（忽略已存在的错误）
+    try {
+        await pool.execute(`ALTER TABLE api_keys ADD COLUMN email VARCHAR(255) DEFAULT NULL`);
+        await pool.execute(`ALTER TABLE api_keys ADD INDEX idx_email (email)`);
+    } catch (e) {
+        // 列或索引已存在，忽略
+    }
+
     // 创建兑换码表
     await pool.execute(`
         CREATE TABLE IF NOT EXISTS redemption_codes (
@@ -1065,11 +1075,11 @@ export class ApiKeyStore {
         return new ApiKeyStore(database);
     }
 
-    async create(userId, name, keyValue, keyHash, keyPrefix) {
+    async create(userId, name, keyValue, keyHash, keyPrefix, email) {
         const [result] = await this.db.execute(`
-            INSERT INTO api_keys (user_id, name, key_value, key_hash, key_prefix)
-            VALUES (?, ?, ?, ?, ?)
-        `, [userId, name, keyValue, keyHash, keyPrefix]);
+            INSERT INTO api_keys (user_id, name, key_value, key_hash, key_prefix, email)
+            VALUES (?, ?, ?, ?, ?, ?)
+        `, [userId, name, keyValue, keyHash, keyPrefix, email || null]);
         return result.insertId;
     }
 
@@ -1211,7 +1221,8 @@ export class ApiKeyStore {
             dailyCostLimit: parseFloat(row.daily_cost_limit) || 0,
             monthlyCostLimit: parseFloat(row.monthly_cost_limit) || 0,
             totalCostLimit: parseFloat(row.total_cost_limit) || 0,
-            expiresInDays: row.expires_in_days || 0
+            expiresInDays: row.expires_in_days || 0,
+            email: row.email || null
         };
     }
 
@@ -1235,8 +1246,17 @@ export class ApiKeyStore {
             dailyCostLimit: parseFloat(row.daily_cost_limit) || 0,
             monthlyCostLimit: parseFloat(row.monthly_cost_limit) || 0,
             totalCostLimit: parseFloat(row.total_cost_limit) || 0,
-            expiresInDays: row.expires_in_days || 0
+            expiresInDays: row.expires_in_days || 0,
+            email: row.email || null
         };
+    }
+
+    async getByEmail(email) {
+        const [rows] = await this.db.execute(
+            'SELECT * FROM api_keys WHERE email = ? ORDER BY created_at DESC',
+            [email]
+        );
+        return rows.map(row => this._mapRow(row));
     }
 }
 

@@ -19,6 +19,7 @@ import { setupWarpRoutes } from './warp/warp-routes.js';
 import { setupWarpMultiAgentRoutes } from './warp/warp-multi-agent.js';
 import { setupWarpProxyRoutes } from './warp/warp-proxy.js';
 import { KIRO_CONSTANTS, MODEL_PRICING, calculateTokenCost, setDynamicPricing } from './constants.js';
+import { sendRedeemEmail, sendRechargeEmail } from './mailer.js';
 import { initProxyConfig, getProxyConfig, saveProxyConfig, testProxyConnection, getAxiosProxyConfig } from './proxy.js';
 import {
     AntigravityApiService,
@@ -1438,7 +1439,7 @@ app.delete('/api/redemption-codes/:id', authMiddleware, async (req, res) => {
 app.post('/api/redeem', async (req, res) => {
     try {
         const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip;
-        const { code, captchaId, captchaAnswer, existingApiKey } = req.body;
+        const { code, captchaId, captchaAnswer, existingApiKey, email } = req.body;
 
         // 1. IP频率限制
         const now = Date.now();
@@ -1522,8 +1523,14 @@ app.post('/api/redeem', async (req, res) => {
             }
         } else {
             // 5b. 创建新 API Key
+            const userStore = await UserStore.create();
+            const allUsers = await userStore.getAll();
+            const adminUser = allUsers.find(u => u.isAdmin) || allUsers[0];
+            if (!adminUser) {
+                return res.status(500).json({ success: false, error: '系统无可用用户，请联系管理员' });
+            }
             const { key, hash, prefix } = generateApiKey();
-            targetKeyId = await apiKeyStore.create(0, `兑换-${pkg.name}`, key, hash, prefix);
+            targetKeyId = await apiKeyStore.create(adminUser.id, `兑换-${pkg.name}`, key, hash, prefix, email || null);
 
             // 设置套餐限制
             await apiKeyStore.updateLimits(targetKeyId, {
@@ -1544,6 +1551,23 @@ app.post('/api/redeem', async (req, res) => {
 
         // 7. 返回结果
         const resultKey = await apiKeyStore.getById(targetKeyId);
+        const resultLimits = {
+            dailyLimit: resultKey.dailyLimit,
+            monthlyLimit: resultKey.monthlyLimit,
+            totalCostLimit: resultKey.totalCostLimit,
+            expiresInDays: resultKey.expiresInDays
+        };
+
+        // 8. 发送邮件通知（异步，不阻塞响应）
+        const targetEmail = email || resultKey.email;
+        if (targetEmail) {
+            if (existingApiKey) {
+                sendRechargeEmail({ to: targetEmail, packageName: pkg.name, limits: resultLimits }).catch(() => {});
+            } else {
+                sendRedeemEmail({ to: targetEmail, apiKey: resultKey.keyValue, packageName: pkg.name, limits: resultLimits }).catch(() => {});
+            }
+        }
+
         res.json({
             success: true,
             data: {
@@ -1551,17 +1575,52 @@ app.post('/api/redeem', async (req, res) => {
                 keyId: targetKeyId,
                 packageName: pkg.name,
                 isRecharge: !!existingApiKey,
-                limits: {
-                    dailyLimit: resultKey.dailyLimit,
-                    monthlyLimit: resultKey.monthlyLimit,
-                    totalCostLimit: resultKey.totalCostLimit,
-                    expiresInDays: resultKey.expiresInDays
-                }
+                limits: resultLimits
             }
         });
     } catch (error) {
         console.error('Redeem error:', error);
         res.status(500).json({ success: false, error: '兑换失败，请稍后重试' });
+    }
+});
+
+// 公开接口：根据邮箱查询 API Key
+app.get('/api/query-by-email', async (req, res) => {
+    try {
+        const email = req.query.email;
+        if (!email || !email.trim()) {
+            return res.status(400).json({ success: false, error: '请输入邮箱' });
+        }
+
+        const apiKeyStore = await ApiKeyStore.create();
+        const keys = await apiKeyStore.getByEmail(email.trim().toLowerCase());
+
+        const safeKeys = keys.map(k => {
+            let expiresAt = null;
+            if (k.expiresInDays > 0 && k.createdAt) {
+                const createDateStr = String(k.createdAt).replace(' ', 'T') + (String(k.createdAt).includes('+') ? '' : '+08:00');
+                const createDate = new Date(createDateStr);
+                expiresAt = new Date(createDate.getTime() + k.expiresInDays * 24 * 60 * 60 * 1000).toISOString();
+            }
+            return {
+                id: k.id,
+                name: k.name,
+                keyValue: k.keyValue,
+                keyPrefix: k.keyPrefix,
+                isActive: k.isActive,
+                createdAt: k.createdAt,
+                expiresAt,
+                dailyLimit: k.dailyLimit,
+                monthlyLimit: k.monthlyLimit,
+                totalCostLimit: k.totalCostLimit,
+                expiresInDays: k.expiresInDays
+            };
+        });
+
+        res.json({ success: true, data: safeKeys });
+    } catch (error) {
+        console.error('Query by email error:', error);
+        res.status(500).json({ success: false, error: '查询失败' });
     }
 });
 

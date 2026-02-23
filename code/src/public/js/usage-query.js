@@ -69,6 +69,31 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('total-input-tokens').textContent = formatNumber(cost.summary.totalInputTokens);
         document.getElementById('total-output-tokens').textContent = formatNumber(cost.summary.totalOutputTokens);
 
+        // 显示剩余天数卡片
+        const daysCard = document.getElementById('remaining-days-card');
+        const daysValue = document.getElementById('remaining-days');
+        if (limits && limits.expiresInDays > 0 && limits.remainingDays !== null) {
+            daysCard.style.display = '';
+            const rd = limits.remainingDays;
+            daysValue.textContent = rd + ' 天';
+            daysValue.style.color = rd <= 0 ? 'var(--accent-danger)' : rd <= 7 ? 'var(--accent-warning)' : '';
+        } else {
+            daysCard.style.display = 'none';
+        }
+
+        // 显示剩余金额卡片
+        const costCard = document.getElementById('remaining-cost-card');
+        const costValue = document.getElementById('remaining-cost');
+        if (limits && limits.totalCostLimit > 0) {
+            costCard.style.display = '';
+            const remaining = Math.max(0, limits.totalCostLimit - usage.totalCost);
+            costValue.textContent = '$' + remaining.toFixed(2);
+            const percent = (usage.totalCost / limits.totalCostLimit) * 100;
+            costValue.style.color = percent >= 90 ? 'var(--accent-danger)' : percent >= 70 ? 'var(--accent-warning)' : '';
+        } else {
+            costCard.style.display = 'none';
+        }
+
         // 显示按模型统计
         const modelStatsBody = document.getElementById('model-stats-body');
         if (cost.models && cost.models.length > 0) {

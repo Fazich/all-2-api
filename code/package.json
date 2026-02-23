@@ -21,6 +21,7 @@
     "https-proxy-agent": "^7.0.6",
     "imapflow": "^1.2.9",
     "mysql2": "^3.16.0",
+    "nodemailer": "^8.0.1",
     "playwright": "^1.58.2",
     "protobufjs": "^7.2.6",
     "undici": "^7.21.0",
