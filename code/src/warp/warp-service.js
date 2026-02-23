@@ -4,6 +4,7 @@
  */
 
 import https from 'https';
+import crypto from 'crypto';
 import { execSync } from 'child_process';
 import { loadProtos, decodeResponseEvent, preloadProtos } from './warp-proto.js';
 import { parseWarpResponseEvent } from './warp-message-converter.js';
@@ -20,7 +21,7 @@ const WARP_CONFIG = {
     path: '/ai/multi-agent',
     headers: {
         'x-warp-client-id': 'warp-app',
-        'x-warp-client-version': 'v0.2026.01.14.08.15.stable_02',
+        'x-warp-client-version': 'v0.2026.02.18.08.22.stable_02',
         'x-warp-os-category': 'macOS',
         'x-warp-os-name': 'macOS',
         'x-warp-os-version': '15.7.2',
@@ -409,7 +410,8 @@ function buildRequestBody(query, model = 'claude-4.1-opus', options = {}) {
     ]);
     const autoResume = Buffer.concat([encodeString(1, "is_auto_resume_after_error"), encodeMessage(2, encodeVarintField(4, 0))]);
     const autoDetect = Buffer.concat([encodeString(1, "is_autodetected_user_query"), encodeMessage(2, encodeVarintField(4, 1))]);
-    const field4Content = Buffer.concat([encodeMessage(2, entrypoint), encodeMessage(2, autoResume), encodeMessage(2, autoDetect)]);
+    const conversationId = encodeString(1, crypto.randomUUID());
+    const field4Content = Buffer.concat([conversationId, encodeMessage(2, entrypoint), encodeMessage(2, autoResume), encodeMessage(2, autoDetect)]);
 
     return Buffer.concat([field1, encodeMessage(2, field2Content), encodeMessage(3, field3Content), encodeMessage(4, field4Content)]);
 }
