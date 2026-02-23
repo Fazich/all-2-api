@@ -3,6 +3,7 @@
 function renderPublicHeader(activePage) {
     const pages = [
         { key: 'usage-query', label: '用量查询', href: '/pages/usage-query.html' },
+        { key: 'status', label: '服务状态', href: '/pages/status.html' },
         { key: 'trial-apply', label: '试用申请', href: '/pages/trial-apply.html' },
         { key: 'docs', label: '在线帮助', href: '/pages/docs.html' },
         { key: 'login', label: '后台登录', href: '/login.html' }

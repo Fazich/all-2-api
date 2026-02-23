@@ -2618,6 +2618,7 @@ app.post('/v1/messages', async (req, res) => {
         userAgent,
         method: 'POST',
         path: '/v1/messages',
+        channel: 'kiro',
         stream: false,
         inputTokens: 0,
         outputTokens: 0,
@@ -2705,8 +2706,11 @@ app.post('/v1/messages', async (req, res) => {
             // 路由到 Orchids 处理
             console.log(`[${getTimestamp()}] [API] 请求路由到 Orchids Provider | Model: ${model}`);
             logData.path = '/v1/messages (orchids)';
+            logData.channel = 'orchids';
 
             const { messages, max_tokens, stream, system } = req.body;
+            logData.model = model || 'claude-sonnet-4-5';
+            logData.stream = !!stream;
 
             // tool_result 快速路由：找到暂停的活跃会话，跳过负载均衡
             if (isToolResultRequest(messages)) {
@@ -2714,7 +2718,6 @@ app.post('/v1/messages', async (req, res) => {
                 if (active) {
                     console.log(`[${getTimestamp()}] [Orchids] /v1/messages tool_result → 路由到活跃会话 (credential ${active.credentialId})`);
                     logData.credentialId = active.credentialId;
-                    logData.stream = !!stream;
                     try {
                         await active.handler.handleMessages(req, res, req.body);
                         logData.statusCode = 200;
@@ -2754,8 +2757,6 @@ app.post('/v1/messages', async (req, res) => {
             console.log(`[${getTimestamp()}] [Orchids] /v1/messages 使用账号: ${orchidsCredential.name} (${orchidsCredential.email || 'N/A'})`);
             logData.credentialId = orchidsCredential.id;
             logData.credentialName = orchidsCredential.name;
-            logData.model = model || 'claude-sonnet-4-5';
-            logData.stream = !!stream;
 
             try {
                 const proxyHandler = getOrchidsProxy(orchidsCredential);
@@ -2792,6 +2793,7 @@ app.post('/v1/messages', async (req, res) => {
 
         if (isAmiProvider) {
             logData.path = '/v1/messages (ami)';
+            logData.channel = 'AMI';
             decrementConcurrent(keyRecord.id, clientIp);
 
             // 直接调用 AMI handler（已包含 API Key 验证和凭据选择）
@@ -3267,6 +3269,7 @@ async function handleOrchidsRequest(req, res) {
         userAgent,
         method: 'POST',
         path: req.path,
+        channel: 'orchids',
         stream: false,
         inputTokens: 0,
         outputTokens: 0,
@@ -3315,6 +3318,8 @@ async function handleOrchidsRequest(req, res) {
         await apiKeyStore.updateLastUsed(keyRecord.id);
 
         const { model, messages, max_tokens, stream, system } = req.body;
+        logData.model = model || 'claude-sonnet-4-5';
+        logData.stream = !!stream;
 
         // tool_result 快速路由：找到暂停的活跃会话，跳过负载均衡
         if (isToolResultRequest(messages)) {
@@ -3322,7 +3327,6 @@ async function handleOrchidsRequest(req, res) {
             if (active) {
                 console.log(`[${getTimestamp()}] [Orchids] tool_result → 路由到活跃会话 (credential ${active.credentialId})`);
                 logData.credentialId = active.credentialId;
-                logData.stream = !!stream;
                 try {
                     await active.handler.handleMessages(req, res, req.body);
                     logData.statusCode = 200;
@@ -3368,8 +3372,6 @@ async function handleOrchidsRequest(req, res) {
 
         logData.credentialId = currentCredential.id;
         logData.credentialName = currentCredential.name;
-        logData.model = model || 'claude-sonnet-4-5';
-        logData.stream = !!stream;
 
         // 粗略估算输入 token 数
         const inputTokens = Math.ceil(JSON.stringify(messages).length / 4);
@@ -3490,6 +3492,7 @@ async function handleGeminiAntigravityRequest(req, res) {
         userAgent,
         method: 'POST',
         path: req.path,
+        channel: 'antigravity',
         stream: false, inputTokens: 0,
         outputTokens: 0,
         statusCode: 200
@@ -3759,6 +3762,7 @@ app.post('/v1/chat/completions', async (req, res) => {
         userAgent,
         method: 'POST',
         path: '/v1/chat/completions',
+        channel: 'openai',
         stream: false,
         inputTokens: 0,
         outputTokens: 0,
@@ -5440,13 +5444,14 @@ app.get('/api/logs', authMiddleware, async (req, res) => {
             return res.status(403).json({ success: false, error: '需要管理员权限' });
         }
 
-        const { page = 1, pageSize = 50, apiKeyId, ipAddress, startDate, endDate } = req.query;
+        const { page = 1, pageSize = 50, apiKeyId, ipAddress, channel, startDate, endDate } = req.query;
 
         const result = await apiLogStore.getAll({
             page: parseInt(page),
             pageSize: parseInt(pageSize),
             apiKeyId: apiKeyId ? parseInt(apiKeyId) : undefined,
             ipAddress,
+            channel,
             startDate,
             endDate
         });
@@ -5559,6 +5564,26 @@ app.get('/api/logs-stats/by-api-key', authMiddleware, async (req, res) => {
         const { startDate, endDate } = req.query;
 
         const stats = await apiLogStore.getStatsByApiKey({
+            startDate,
+            endDate
+        });
+
+        res.json({ success: true, data: stats });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// 获取按渠道统计（错误量、连通率）
+app.get('/api/logs-stats/by-channel', authMiddleware, async (req, res) => {
+    try {
+        if (!req.user.isAdmin) {
+            return res.status(403).json({ success: false, error: '需要管理员权限' });
+        }
+
+        const { startDate, endDate } = req.query;
+
+        const stats = await apiLogStore.getStatsByChannel({
             startDate,
             endDate
         });
@@ -6154,6 +6179,34 @@ app.post('/api/public/usage', async (req, res) => {
                 }
             }
         });
+    } catch (error) {
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// 公开查询渠道连通率（无需登录）
+app.get('/api/public/channel-stats', async (req, res) => {
+    try {
+        const { hours = 24 } = req.query;
+        const h = Math.min(Math.max(parseInt(hours) || 24, 1), 720);
+        const startDate = new Date(Date.now() - h * 60 * 60 * 1000).toISOString();
+
+        // 根据时间范围自动选择合适的时间粒度
+        let intervalMinutes;
+        if (h <= 6) intervalMinutes = 10;
+        else if (h <= 24) intervalMinutes = 30;
+        else if (h <= 72) intervalMinutes = 60;
+        else intervalMinutes = 180;
+
+        const [summaryRaw, timelineRaw] = await Promise.all([
+            apiLogStore.getStatsByChannel({ startDate }),
+            apiLogStore.getChannelTimeSlotStats({ startDate, intervalMinutes })
+        ]);
+
+        const summary = summaryRaw.filter(s => s.channel !== 'unknown');
+        const timeline = timelineRaw.filter(t => t.channel !== 'unknown');
+
+        res.json({ success: true, data: { hours: h, intervalMinutes, summary, timeline } });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });
     }

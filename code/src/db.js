@@ -122,6 +122,7 @@ export async function initDatabase() {
             api_key_prefix VARCHAR(50),
             credential_id INT,
             credential_name VARCHAR(255),
+            channel VARCHAR(50) DEFAULT NULL,
             ip_address VARCHAR(50),
             user_agent TEXT,
             method VARCHAR(10) DEFAULT 'POST',
@@ -139,9 +140,18 @@ export async function initDatabase() {
             INDEX idx_created_at (created_at),
             INDEX idx_api_key_id (api_key_id),
             INDEX idx_ip_address (ip_address),
-            INDEX idx_request_id (request_id)
+            INDEX idx_request_id (request_id),
+            INDEX idx_channel (channel)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
+
+    // 为已有 api_logs 表添加 channel 列（忽略已存在的错误）
+    try {
+        await pool.execute(`ALTER TABLE api_logs ADD COLUMN channel VARCHAR(50) DEFAULT NULL`);
+        await pool.execute(`ALTER TABLE api_logs ADD INDEX idx_channel (channel)`);
+    } catch (e) {
+        // 列或索引已存在，忽略
+    }
 
     // 创建 Gemini Antigravity 凭证表
     await pool.execute(`
@@ -1277,16 +1287,17 @@ export class ApiLogStore {
         const [result] = await this.db.execute(`
             INSERT INTO api_logs (
                 request_id, api_key_id, api_key_prefix, credential_id, credential_name,
-                ip_address, user_agent, method, path, model, stream,
+                channel, ip_address, user_agent, method, path, model, stream,
                 input_tokens, output_tokens,
                 status_code, error_message, duration_ms
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `, [
             logData.requestId || null,
             logData.apiKeyId !== undefined ? logData.apiKeyId : null,
             logData.apiKeyPrefix !== undefined ? logData.apiKeyPrefix : null,
             logData.credentialId !== undefined ? logData.credentialId : null,
             logData.credentialName !== undefined ? logData.credentialName : null,
+            logData.channel || null,
             logData.ipAddress !== undefined ? logData.ipAddress : null,
             logData.userAgent !== undefined ? logData.userAgent : null,
             logData.method || 'POST',
@@ -1303,7 +1314,7 @@ export class ApiLogStore {
     }
 
     async getAll(options = {}) {
-        const { page = 1, pageSize = 100, apiKeyId, ipAddress, startDate, endDate } = options;
+        const { page = 1, pageSize = 100, apiKeyId, ipAddress, channel, startDate, endDate } = options;
         const limit = parseInt(pageSize) || 100;
         const offset = ((parseInt(page) || 1) - 1) * limit;
 
@@ -1317,6 +1328,10 @@ export class ApiLogStore {
         if (ipAddress) {
             query += ' AND ip_address = ?';
             params.push(ipAddress);
+        }
+        if (channel) {
+            query += ' AND channel = ?';
+            params.push(channel);
         }
         if (startDate) {
             query += ' AND created_at >= ?';
@@ -1389,6 +1404,7 @@ export class ApiLogStore {
             apiKeyPrefix: row.api_key_prefix,
             credentialId: row.credential_id,
             credentialName: row.credential_name,
+            channel: row.channel,
             ipAddress: row.ip_address,
             userAgent: row.user_agent,
             method: row.method,
@@ -1913,6 +1929,46 @@ export class ApiLogStore {
         }));
     }
 
+    async getStatsByChannel(options = {}) {
+        const { startDate, endDate } = options;
+        let query = `
+            SELECT
+                COALESCE(channel, 'unknown') as channel,
+                COUNT(*) as totalRequests,
+                SUM(CASE WHEN status_code >= 200 AND status_code < 400 THEN 1 ELSE 0 END) as successCount,
+                SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) as errorCount,
+                COALESCE(SUM(input_tokens), 0) as inputTokens,
+                COALESCE(SUM(output_tokens), 0) as outputTokens,
+                COALESCE(AVG(duration_ms), 0) as avgDurationMs
+            FROM api_logs
+            WHERE 1=1
+        `;
+        const params = [];
+
+        if (startDate) {
+            query += ' AND created_at >= ?';
+            params.push(startDate);
+        }
+        if (endDate) {
+            query += ' AND created_at <= ?';
+            params.push(endDate);
+        }
+
+        query += ' GROUP BY channel ORDER BY totalRequests DESC';
+
+        const [rows] = await this.db.execute(query, params);
+        return rows.map(row => ({
+            channel: row.channel,
+            totalRequests: Number(row.totalRequests) || 0,
+            successCount: Number(row.successCount) || 0,
+            errorCount: Number(row.errorCount) || 0,
+            successRate: row.totalRequests > 0 ? ((Number(row.successCount) / Number(row.totalRequests)) * 100).toFixed(2) : '0.00',
+            inputTokens: Number(row.inputTokens) || 0,
+            outputTokens: Number(row.outputTokens) || 0,
+            avgDurationMs: Math.round(Number(row.avgDurationMs) || 0)
+        }));
+    }
+
     async getStatsByDate(options = {}) {
         const { startDate, endDate, apiKeyId } = options;
         let query = `
@@ -1985,6 +2041,49 @@ export class ApiLogStore {
             inputTokens: Number(row.inputTokens) || 0,
             outputTokens: Number(row.outputTokens) || 0
         }));
+    }
+
+    async getChannelTimeSlotStats(options = {}) {
+        const { startDate, endDate, intervalMinutes = 30 } = options;
+        let query = `
+            SELECT
+                COALESCE(channel, 'unknown') as channel,
+                FROM_UNIXTIME(FLOOR(UNIX_TIMESTAMP(created_at) / (? * 60)) * (? * 60)) as time_slot,
+                COUNT(*) as totalRequests,
+                SUM(CASE WHEN status_code >= 200 AND status_code < 400 THEN 1 ELSE 0 END) as successCount,
+                SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) as errorCount,
+                COALESCE(AVG(duration_ms), 0) as avgDurationMs
+            FROM api_logs
+            WHERE 1=1
+        `;
+        const params = [intervalMinutes, intervalMinutes];
+
+        if (startDate) {
+            query += ' AND created_at >= ?';
+            params.push(startDate);
+        }
+        if (endDate) {
+            query += ' AND created_at <= ?';
+            params.push(endDate);
+        }
+
+        query += ' GROUP BY channel, time_slot ORDER BY channel, time_slot ASC';
+
+        const [rows] = await this.db.execute(query, params);
+
+        const channelMap = {};
+        for (const row of rows) {
+            const ch = row.channel;
+            if (!channelMap[ch]) channelMap[ch] = { channel: ch, slots: [] };
+            channelMap[ch].slots.push({
+                time: row.time_slot,
+                total: Number(row.totalRequests) || 0,
+                success: Number(row.successCount) || 0,
+                error: Number(row.errorCount) || 0,
+                avgMs: Math.round(Number(row.avgDurationMs) || 0)
+            });
+        }
+        return Object.values(channelMap);
     }
 }
 
