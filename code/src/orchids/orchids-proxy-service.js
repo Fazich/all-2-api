@@ -792,6 +792,21 @@ export class ProxyHandler {
     this._sessionModel = '';
   }
 
+  /**
+   * 查询账号额度信息
+   * @returns {Object} { plan, credits, profile }
+   */
+  async queryCredits() {
+    const api = new OrchidsAPI(this.config, this.auth);
+    const me = await api.ensureUser();
+    const profile = (me && me.profile) || {};
+    return {
+      plan: profile.plan || null,
+      credits: profile.credits ?? null,
+      profile,
+    };
+  }
+
   async initialize() {
     const token = await this.auth.getToken();
     console.log(`[proxy] Token 获取成功 (${this.credential.name || this.credential.email})`);

@@ -222,6 +222,15 @@ export async function initDatabase() {
     try {
         await pool.execute(`ALTER TABLE orchids_credentials ADD COLUMN last_used_at DATETIME AFTER failure_count`);
     } catch (e) { /* 字段可能已存在 */ }
+    try {
+        await pool.execute(`ALTER TABLE orchids_credentials ADD COLUMN plan VARCHAR(50) DEFAULT NULL AFTER usage_updated_at`);
+    } catch (e) { /* 字段可能已存在 */ }
+    try {
+        await pool.execute(`ALTER TABLE orchids_credentials ADD COLUMN credits INT DEFAULT NULL AFTER plan`);
+    } catch (e) { /* 字段可能已存在 */ }
+    try {
+        await pool.execute(`ALTER TABLE orchids_credentials ADD COLUMN credits_updated_at DATETIME DEFAULT NULL AFTER credits`);
+    } catch (e) { /* 字段可能已存在 */ }
 
     // 创建 Orchids 错误凭证表
     await pool.execute(`
@@ -2275,6 +2284,10 @@ export class OrchidsCredentialStore {
         await this.db.execute('UPDATE orchids_credentials SET is_active = 1 WHERE id = ?', [id]);
     }
 
+    async deactivate(id) {
+        await this.db.execute('UPDATE orchids_credentials SET is_active = 0 WHERE id = ?', [id]);
+    }
+
     async updateUsage(id, usageData) {
         const usageJson = JSON.stringify(usageData);
         await this.db.execute(`
@@ -2283,6 +2296,16 @@ export class OrchidsCredentialStore {
                 usage_updated_at = NOW()
             WHERE id = ?
         `, [usageJson, id]);
+    }
+
+    async updateCredits(id, plan, credits) {
+        await this.db.execute(`
+            UPDATE orchids_credentials SET
+                plan = ?,
+                credits = ?,
+                credits_updated_at = NOW()
+            WHERE id = ?
+        `, [plan, credits, id]);
     }
 
     async incrementErrorCount(id, errorMessage) {
@@ -2322,6 +2345,9 @@ export class OrchidsCredentialStore {
             lastUsedAt: row.last_used_at,
             usageData: row.usage_data ? (typeof row.usage_data === 'string' ? JSON.parse(row.usage_data) : row.usage_data) : null,
             usageUpdatedAt: row.usage_updated_at,
+            plan: row.plan || null,
+            credits: row.credits != null ? row.credits : null,
+            creditsUpdatedAt: row.credits_updated_at,
             errorCount: row.error_count || 0,
             lastErrorAt: row.last_error_at,
             lastErrorMessage: row.last_error_message,

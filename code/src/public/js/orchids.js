@@ -177,11 +177,13 @@ async function loadCredentials() {
         if (!response.ok) throw new Error('加载失败');
 
         const data = await response.json();
-        // 兼容不同的返回格式
-        OrchidsState.credentials = Array.isArray(data) ? data : (data.data || []);
+        // 兼容不同的返回格式，只展示活跃账户
+        const all = Array.isArray(data) ? data : (data.data || []);
+        OrchidsState.credentials = all.filter(c => c.isActive !== false);
         
-        // 并行加载用量数据和健康状态
-        await Promise.all([loadUsageData(), fetchHealthStatus()]);
+        // 从 credentials 数据计算用量（同步），并行加载健康状态
+        loadUsageData();
+        await fetchHealthStatus();
         renderCredentials();
     } catch (error) {
         showToast(error.message, 'error');
@@ -249,7 +251,7 @@ function createCardHTML(cred) {
                         <span>${escapeHtml(displayEmail)}</span>
                     </div>
                     <div class="card-meta">
-                        <span>Free</span>
+                        <span>${(OrchidsState.usageData?.accounts?.find(a => a.id === cred.id)?.usage?.plan) || 'Free'}</span>
                         <span class="card-meta-divider"></span>
                         <span>权重: ${cred.weight || 1}</span>
                     </div>
@@ -552,23 +554,39 @@ function handleExport() {
     window.location.href = `/api/orchids/export?token=${localStorage.getItem('authToken')}`;
 }
 
-// Usage Data
-async function loadUsageData() {
-    try {
-        const response = await fetch('/api/orchids/usage', {
-            headers: { 'Authorization': `Bearer ${localStorage.getItem('authToken')}` }
-        });
-
-        if (!response.ok) throw new Error('加载用量失败');
-
-        const result = await response.json();
-        if (result.success) {
-            OrchidsState.usageData = result.data;
-            updateUsageDisplay();
+// Usage Data — 从已加载的 credentials 中读取数据库缓存的 plan/credits
+function loadUsageData() {
+    const PLAN_LIMITS = { FREE: 150000, PRO: 1500000 };
+    const creds = OrchidsState.credentials || [];
+    const accounts = creds.map(cred => {
+        const plan = (cred.plan || 'FREE').toUpperCase();
+        const limit = PLAN_LIMITS[plan] || 150000;
+        const remaining = cred.credits != null ? cred.credits : limit;
+        const used = Math.max(0, limit - remaining);
+        const percentage = limit > 0 ? Math.min(100, Math.round((used / limit) * 100)) : 0;
+        return {
+            id: cred.id,
+            name: cred.name,
+            email: cred.email,
+            isActive: cred.isActive,
+            usage: { used, limit, remaining, percentage, plan: cred.plan || 'Free' },
+        };
+    });
+    const activeAccounts = accounts.filter(a => a.isActive);
+    const totalUsed = activeAccounts.reduce((s, a) => s + a.usage.used, 0);
+    const totalLimit = activeAccounts.reduce((s, a) => s + a.usage.limit, 0);
+    const totalRemaining = Math.max(0, totalLimit - totalUsed);
+    const totalPercentage = totalLimit > 0 ? Math.round((totalUsed / totalLimit) * 100) : 0;
+    OrchidsState.usageData = {
+        accounts,
+        summary: {
+            totalAccounts: accounts.length,
+            activeAccounts: activeAccounts.length,
+            accountsWithUsage: accounts.filter(a => a.usage.remaining < a.usage.limit).length,
+            totalUsed, totalLimit, totalRemaining, totalPercentage,
         }
-    } catch (error) {
-        console.error('加载用量数据失败:', error);
-    }
+    };
+    updateUsageDisplay();
 }
 
 function updateUsageDisplay() {
@@ -628,15 +646,14 @@ async function handleRefreshUsage() {
     }
 
     try {
-        // 使用 SSE 流式刷新
-        const eventSource = new EventSource('/api/orchids/usage/refresh/stream');
+        // 使用 SSE 流式刷新额度（查询 Orchids /auth/me 并写入数据库）
+        const eventSource = new EventSource('/api/orchids/credits/refresh/stream');
         
         eventSource.onmessage = async (event) => {
             try {
                 const data = JSON.parse(event.data);
                 
                 if (data.type === 'progress') {
-                    // 实时更新显示
                     const progressText = `${data.current}/${data.total}`;
                     if (btn) btn.innerHTML = `
                         <svg class="btn-icon spinning" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -646,12 +663,13 @@ async function handleRefreshUsage() {
                     `;
                 } else if (data.type === 'complete') {
                     eventSource.close();
-                    showToast(`用量刷新完成：成功 ${data.success}，失败 ${data.failed}`, 'success');
-                    await loadUsageData();
+                    const disabledMsg = data.disabled ? `，已禁用 ${data.disabled} 个(>85%)` : '';
+                    showToast(`额度刷新完成：成功 ${data.success}，失败 ${data.failed}${disabledMsg}`, data.disabled ? 'warning' : 'success');
+                    await loadCredentials();
                     resetRefreshButton();
                 } else if (data.type === 'error') {
                     eventSource.close();
-                    showToast('刷新失败: ' + data.error, 'error');
+                    showToast('刷新失败: ' + data.message, 'error');
                     resetRefreshButton();
                 }
             } catch (e) {
@@ -665,7 +683,7 @@ async function handleRefreshUsage() {
         };
 
     } catch (error) {
-        showToast('刷新用量失败: ' + error.message, 'error');
+        showToast('刷新额度失败: ' + error.message, 'error');
         resetRefreshButton();
     }
 
@@ -676,7 +694,7 @@ async function handleRefreshUsage() {
                 <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/>
                 </svg>
-                刷新用量
+                刷新额度
             `;
         }
     }

@@ -137,6 +137,80 @@ export function setupOrchidsRoutes(app, orchidsStore) {
         }
     });
 
+    // ============ 额度查询 API（通过 Orchids /auth/me 接口）============
+
+    // 刷新单个账号的额度（查询 API 并写入数据库）
+    app.post('/api/orchids/credentials/:id/credits/refresh', async (req, res) => {
+        try {
+            const id = parseInt(req.params.id);
+            const credential = await orchidsStore.getById(id);
+            if (!credential) {
+                return res.status(404).json({ success: false, error: '凭证不存在' });
+            }
+
+            const handler = new ProxyHandler(credential);
+            const result = await handler.queryCredits();
+            await orchidsStore.updateCredits(id, result.plan, result.credits);
+            res.json({
+                success: true,
+                data: { id, name: credential.name, email: credential.email, plan: result.plan, credits: result.credits }
+            });
+        } catch (error) {
+            res.status(500).json({ success: false, error: error.message });
+        }
+    });
+
+    // SSE 流式批量刷新所有账号额度（查询 API 并写入数据库）
+    app.get('/api/orchids/credits/refresh/stream', async (req, res) => {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        res.setHeader('X-Accel-Buffering', 'no');
+
+        try {
+            const credentials = await orchidsStore.getAllActive();
+            const total = credentials.length;
+            let successCount = 0;
+            let failCount = 0;
+
+            const PLAN_LIMITS = { FREE: 150000, PRO: 1500000 };
+            const DISABLE_THRESHOLD = 0.85; // 使用率超过 85% 自动禁用
+            let disabledCount = 0;
+
+            for (let i = 0; i < total; i++) {
+                const cred = credentials[i];
+                try {
+                    const handler = new ProxyHandler(cred);
+                    const result = await handler.queryCredits();
+                    await orchidsStore.updateCredits(cred.id, result.plan, result.credits);
+
+                    // 检查使用率，超过 85% 自动禁用
+                    let disabled = false;
+                    if (result.credits != null) {
+                        const limit = PLAN_LIMITS[(result.plan || 'FREE').toUpperCase()] || 150000;
+                        const used = Math.max(0, limit - result.credits);
+                        if (limit > 0 && (used / limit) >= DISABLE_THRESHOLD && cred.isActive) {
+                            await orchidsStore.deactivate(cred.id);
+                            disabled = true;
+                            disabledCount++;
+                        }
+                    }
+
+                    successCount++;
+                    res.write(`data: ${JSON.stringify({ type: 'progress', current: i + 1, total, id: cred.id, name: cred.name, plan: result.plan, credits: result.credits, disabled, error: null })}\n\n`);
+                } catch (error) {
+                    failCount++;
+                    res.write(`data: ${JSON.stringify({ type: 'progress', current: i + 1, total, id: cred.id, name: cred.name, plan: null, credits: null, disabled: false, error: error.message })}\n\n`);
+                }
+            }
+
+            res.write(`data: ${JSON.stringify({ type: 'complete', success: successCount, failed: failCount, disabled: disabledCount, total })}\n\n`);
+        } catch (error) {
+            res.write(`data: ${JSON.stringify({ type: 'error', message: error.message })}\n\n`);
+        }
+        res.end();
+    });
+
     // ============ 用量信息 API ============
 
     // 获取单个账号的用量信息
