@@ -6,6 +6,7 @@
 import express from 'express';
 import { FlowTokenStore } from './flow-token-store.js';
 import { FlowGenerationHandler, MODEL_CONFIG } from './flow-handler.js';
+import { ApiLogStore } from '../db.js';
 import { logger } from '../logger.js';
 
 export function createFlowRoutes(pool) {
@@ -32,6 +33,24 @@ export function createFlowRoutes(pool) {
      * POST /v1/chat/completions - 聊天补全（生成图片/视频）
      */
     router.post('/v1/chat/completions', async (req, res) => {
+        const flowStartTime = Date.now();
+        const flowRequestId = 'flow_' + Date.now() + Math.random().toString(36).substring(2, 8);
+        const flowClientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || 'unknown';
+        let flowApiLogStore = null;
+        let flowLogData = {
+            requestId: flowRequestId,
+            ipAddress: flowClientIp,
+            userAgent: req.headers['user-agent'] || '',
+            method: 'POST',
+            path: '/flow/v1/chat/completions',
+            channel: 'Flow',
+            stream: false,
+            inputTokens: 0,
+            outputTokens: 0,
+            statusCode: 200
+        };
+        try { flowApiLogStore = await ApiLogStore.create(); } catch (e) { /* ignore */ }
+
         try {
             const { model, messages, stream = false } = req.body;
 
@@ -58,6 +77,9 @@ export function createFlowRoutes(pool) {
 
             logger.flow?.info(`[API] Chat completion request - model: ${model}, stream: ${stream}`);
 
+            flowLogData.model = model;
+            flowLogData.stream = !!stream;
+
             if (stream) {
                 // 流式响应
                 res.setHeader('Content-Type', 'text/event-stream');
@@ -69,6 +91,8 @@ export function createFlowRoutes(pool) {
                 }
                 res.write('data: [DONE]\n\n');
                 res.end();
+
+                if (flowApiLogStore) await flowApiLogStore.create({ ...flowLogData, durationMs: Date.now() - flowStartTime });
             } else {
                 // 非流式响应
                 let result = null;
@@ -82,7 +106,11 @@ export function createFlowRoutes(pool) {
                         return res.status(400).json(parsed);
                     }
                     res.json(parsed);
+                    if (flowApiLogStore) await flowApiLogStore.create({ ...flowLogData, durationMs: Date.now() - flowStartTime });
                 } else {
+                    flowLogData.statusCode = 500;
+                    flowLogData.errorMessage = 'Generation failed';
+                    if (flowApiLogStore) await flowApiLogStore.create({ ...flowLogData, durationMs: Date.now() - flowStartTime });
                     res.status(500).json({
                         error: {
                             message: 'Generation failed',
@@ -93,6 +121,9 @@ export function createFlowRoutes(pool) {
             }
         } catch (error) {
             logger.flow?.error(`[API] Chat completion error: ${error.message}`);
+            flowLogData.statusCode = 500;
+            flowLogData.errorMessage = error.message;
+            if (flowApiLogStore) await flowApiLogStore.create({ ...flowLogData, durationMs: Date.now() - flowStartTime });
             res.status(500).json({
                 error: {
                     message: error.message,

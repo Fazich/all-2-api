@@ -1134,6 +1134,17 @@ body {
 .logs-type-badge.sync { background: var(--bg-tertiary); color: var(--text-secondary); }
 .logs-status-badge.success { background: var(--accent-success-bg); color: var(--accent-success); }
 .logs-status-badge.error { background: var(--accent-danger-bg); color: var(--accent-danger); }
+.logs-status-badge.warning { background: rgba(251, 191, 36, 0.1); color: #fbbf24; }
+
+.logs-channel-badge {
+    display: inline-block;
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+    font-size: 11px;
+    font-weight: 500;
+    background: rgba(139, 92, 246, 0.1);
+    color: #a78bfa;
+}
 
 .logs-actions-cell { display: flex; gap: 4px; }
 

@@ -310,6 +310,7 @@ function navigateTo(page) {
         'change-password': '/pages/change-password.html',
         'trial-admin': '/pages/trial-admin.html',
         'site-settings': '/pages/site-settings.html',
+        'channels': '/pages/channels.html',
         'pricing': '/pages/pricing.html',
         'dashboard': '/pages/accounts.html',
         'rules': '/pages/accounts.html',
@@ -520,6 +521,16 @@ function getSidebarHTML(stats = { total: 0, active: 0, error: 0 }) {
                             <line x1="9" y1="21" x2="9" y2="9"/>
                         </svg>
                         站点设置
+                    </a>
+                    <a href="#" class="nav-item nav-subitem" data-page="channels">
+                        <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M2 20h.01"/>
+                            <path d="M7 20v-4"/>
+                            <path d="M12 20v-8"/>
+                            <path d="M17 20V8"/>
+                            <path d="M22 4v16"/>
+                        </svg>
+                        通道管理
                     </a>
                     <a href="#" class="nav-item nav-subitem" data-page="pricing">
                         <svg class="nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">

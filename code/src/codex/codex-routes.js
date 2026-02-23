@@ -581,6 +581,7 @@ export function setupCodexRoutes(app, authMiddleware, verifyApiKey, apiLogStore)
             requestId: responseId,
             endpoint: '/codex/responses',
             method: 'POST',
+            channel: 'codex',
             clientIp,
             model: req.body?.model || 'gpt-5',
             inputTokens: 0,

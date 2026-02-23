@@ -19,6 +19,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     loadLogs();
     loadLogsStats();
+    loadChannelStats();
     setupEventListeners();
     updateSidebarStats();
 });
@@ -88,6 +89,7 @@ async function loadLogs() {
     var ipFilter = document.getElementById('logs-filter-ip').value.trim();
     var modelFilter = document.getElementById('logs-filter-model').value;
     var statusFilter = document.getElementById('logs-filter-status').value;
+    var channelFilter = document.getElementById('logs-filter-channel').value;
     var apiKeyFilter = document.getElementById('logs-filter-apikey').value.trim();
     var startDate = document.getElementById('logs-filter-start').value;
     var endDate = document.getElementById('logs-filter-end').value;
@@ -96,6 +98,7 @@ async function loadLogs() {
     if (ipFilter) url += '&ipAddress=' + encodeURIComponent(ipFilter);
     if (modelFilter) url += '&model=' + encodeURIComponent(modelFilter);
     if (statusFilter) url += '&statusCode=' + encodeURIComponent(statusFilter);
+    if (channelFilter) url += '&channel=' + encodeURIComponent(channelFilter);
     if (apiKeyFilter) url += '&apiKeyPrefix=' + encodeURIComponent(apiKeyFilter);
     if (startDate) url += '&startDate=' + startDate;
     if (endDate) url += '&endDate=' + endDate;
@@ -135,6 +138,49 @@ async function loadLogsStats() {
     }
 }
 
+async function loadChannelStats() {
+    try {
+        var startDate = document.getElementById('logs-filter-start').value;
+        var endDate = document.getElementById('logs-filter-end').value;
+        var url = '/api/logs-stats/by-channel?';
+        if (startDate) url += 'startDate=' + startDate + '&';
+        if (endDate) url += 'endDate=' + endDate + '&';
+
+        var res = await fetch(url, {
+            headers: { 'Authorization': 'Bearer ' + authToken }
+        });
+        var result = await res.json();
+        if (result.success && result.data) {
+            renderChannelStats(result.data);
+        }
+    } catch (err) {
+        console.error('Load channel stats error:', err);
+    }
+}
+
+function renderChannelStats(stats) {
+    var list = document.getElementById('channel-stats-list');
+    if (!stats || stats.length === 0) {
+        list.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 20px; color: var(--text-muted);">暂无渠道数据</td></tr>';
+        return;
+    }
+
+    list.innerHTML = stats.map(function(s) {
+        var rateNum = parseFloat(s.successRate);
+        var rateClass = rateNum >= 95 ? 'success' : rateNum >= 80 ? 'warning' : 'error';
+        return '<tr>' +
+            '<td><span class="logs-channel-badge">' + s.channel + '</span></td>' +
+            '<td>' + formatNumber(s.totalRequests) + '</td>' +
+            '<td style="color: #4ade80;">' + formatNumber(s.successCount) + '</td>' +
+            '<td style="color: #f87171;">' + formatNumber(s.errorCount) + '</td>' +
+            '<td><span class="logs-status-badge ' + rateClass + '">' + s.successRate + '%</span></td>' +
+            '<td>' + formatNumber(s.inputTokens) + '</td>' +
+            '<td>' + formatNumber(s.outputTokens) + '</td>' +
+            '<td>' + s.avgDurationMs + 'ms</td>' +
+            '</tr>';
+    }).join('');
+}
+
 function renderLogs(data) {
     var list = document.getElementById('logs-list');
     var logs = data.logs || [];
@@ -154,7 +200,7 @@ function renderLogs(data) {
     document.getElementById('logs-next-btn').disabled = currentLogsPage >= totalPages;
 
     if (logs.length === 0) {
-        list.innerHTML = '<tr><td colspan="9" style="text-align: center; padding: 40px; color: var(--text-muted);">暂无日志记录</td></tr>';
+        list.innerHTML = '<tr><td colspan="10" style="text-align: center; padding: 40px; color: var(--text-muted);">暂无日志记录</td></tr>';
         return;
     }
 
@@ -162,11 +208,13 @@ function renderLogs(data) {
         var statusClass = log.statusCode >= 400 ? 'error' : 'success';
         var typeClass = log.stream ? 'stream' : 'sync';
         var typeText = log.stream ? '流式' : '同步';
+        var channelLabel = log.channel || '-';
 
         return '<tr>' +
             '<td>' + formatDateTime(log.createdAt) + '</td>' +
             '<td class="logs-ip-cell">' + (log.ipAddress || '-') + '</td>' +
             '<td><span class="logs-key-cell">' + (log.apiKeyPrefix || '-') + '</span></td>' +
+            '<td><span class="logs-channel-badge">' + channelLabel + '</span></td>' +
             '<td class="logs-model-cell">' + formatModelName(log.model) + '</td>' +
             '<td><span class="logs-type-badge ' + typeClass + '">' + typeText + '</span></td>' +
             '<td class="logs-tokens-cell">' + (log.inputTokens || 0) + ' / ' + (log.outputTokens || 0) + '</td>' +
@@ -206,6 +254,7 @@ function resetLogsFilter() {
     document.getElementById('logs-filter-ip').value = '';
     document.getElementById('logs-filter-model').value = '';
     document.getElementById('logs-filter-status').value = '';
+    document.getElementById('logs-filter-channel').value = '';
     document.getElementById('logs-filter-apikey').value = '';
     document.getElementById('logs-filter-start').value = '';
     document.getElementById('logs-filter-end').value = '';
@@ -247,6 +296,7 @@ function renderLogDetail(log) {
     html += createDetailItem('时间', formatDateTime(log.createdAt));
     html += createDetailItem('IP 地址', log.ipAddress || '-');
     html += createDetailItem('API Key', log.apiKeyPrefix || '-');
+    html += createDetailItem('渠道', log.channel || '-');
     html += '</div></div>';
 
     // 请求信息

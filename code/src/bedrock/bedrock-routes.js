@@ -2,7 +2,7 @@
  * Amazon Bedrock API 路由
  */
 import express from 'express';
-import { BedrockCredentialStore } from '../db.js';
+import { BedrockCredentialStore, ApiLogStore } from '../db.js';
 import { BedrockClient, BedrockAPI } from './bedrock.js';
 import { BEDROCK_CONSTANTS, BEDROCK_MODELS, BEDROCK_MODEL_MAPPING, calculateTokenCost } from '../constants.js';
 import { logger } from '../logger.js';
@@ -518,6 +518,27 @@ router.post('/chat/stream', async (req, res) => {
  * 支持流式和非流式响应
  */
 router.post('/v1/messages', async (req, res) => {
+    const startTime = Date.now();
+    const requestId = 'bedrock_' + Date.now() + Math.random().toString(36).substring(2, 8);
+    const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || 'unknown';
+    let apiLogStore = null;
+    let logData = {
+        requestId,
+        ipAddress: clientIp,
+        userAgent: req.headers['user-agent'] || '',
+        method: 'POST',
+        path: '/bedrock/v1/messages',
+        channel: 'Bedrock',
+        stream: false,
+        inputTokens: 0,
+        outputTokens: 0,
+        statusCode: 200
+    };
+
+    try {
+        apiLogStore = await ApiLogStore.create();
+    } catch (e) { /* ignore */ }
+
     try {
         const { messages, model, system, max_tokens, temperature, top_p, stop_sequences, tools, stream } = req.body;
 
@@ -648,6 +669,15 @@ router.post('/v1/messages', async (req, res) => {
                     await store.updateTokenStats(credential.id, inputTokens, outputTokens, totalCost);
                 }
 
+                // 记录成功日志
+                logData.credentialId = credential.id;
+                logData.credentialName = credential.name;
+                logData.model = modelToUse;
+                logData.stream = true;
+                logData.inputTokens = inputTokens;
+                logData.outputTokens = outputTokens;
+                if (apiLogStore) await apiLogStore.create({ ...logData, durationMs: Date.now() - startTime });
+
             } catch (streamError) {
                 log.error(`Bedrock 流式响应错误: ${streamError.message}`);
                 res.write(`event: error\ndata: ${JSON.stringify({
@@ -656,6 +686,7 @@ router.post('/v1/messages', async (req, res) => {
                 })}\n\n`);
             }
 
+            // 记录流式错误日志（如果上面 catch 了 streamError）
             res.end();
         } else {
             // 非流式响应
@@ -663,17 +694,29 @@ router.post('/v1/messages', async (req, res) => {
 
             // 更新使用计数和 token 统计
             await store.incrementUseCount(credential.id);
-            if (response.usage) {
-                const inputTokens = response.usage.input_tokens || 0;
-                const outputTokens = response.usage.output_tokens || 0;
-                const { totalCost } = calculateTokenCost(modelToUse, inputTokens, outputTokens);
-                await store.updateTokenStats(credential.id, inputTokens, outputTokens, totalCost);
+            const inTok = response.usage?.input_tokens || 0;
+            const outTok = response.usage?.output_tokens || 0;
+            if (inTok > 0 || outTok > 0) {
+                const { totalCost } = calculateTokenCost(modelToUse, inTok, outTok);
+                await store.updateTokenStats(credential.id, inTok, outTok, totalCost);
             }
+
+            // 记录成功日志
+            logData.credentialId = credential.id;
+            logData.credentialName = credential.name;
+            logData.model = modelToUse;
+            logData.inputTokens = inTok;
+            logData.outputTokens = outTok;
+            if (apiLogStore) await apiLogStore.create({ ...logData, durationMs: Date.now() - startTime });
 
             res.json(response);
         }
     } catch (error) {
         log.error(`Bedrock /v1/messages 失败: ${error.message}`);
+
+        logData.statusCode = error.response?.status || 500;
+        logData.errorMessage = error.message;
+        if (apiLogStore) await apiLogStore.create({ ...logData, durationMs: Date.now() - startTime });
 
         if (!res.headersSent) {
             const statusCode = error.response?.status || 500;

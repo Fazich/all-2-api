@@ -4,7 +4,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import axios from 'axios';
 import crypto from 'crypto';
-import { CredentialStore, UserStore, ApiKeyStore, ApiLogStore, GeminiCredentialStore, OrchidsCredentialStore, WarpCredentialStore, TrialApplicationStore, SiteSettingsStore, VertexCredentialStore, BedrockCredentialStore, ModelPricingStore, AmiCredentialStore, PackageStore, FullAccountStore, ModelMappingStore, RedemptionCodeStore, initDatabase } from './db.js';
+import { CredentialStore, UserStore, ApiKeyStore, ApiLogStore, GeminiCredentialStore, OrchidsCredentialStore, WarpCredentialStore, TrialApplicationStore, SiteSettingsStore, VertexCredentialStore, BedrockCredentialStore, ModelPricingStore, AmiCredentialStore, PackageStore, FullAccountStore, ModelMappingStore, RedemptionCodeStore, ChannelStore, initDatabase } from './db.js';
 import { KiroClient } from './kiro/client.js';
 import { KiroService } from './kiro/kiro-service.js';
 import { KiroAPI } from './kiro/api.js';
@@ -131,6 +131,7 @@ let trialStore = null;
 let siteSettingsStore = null;
 let pricingStore = null;
 let amiStore = null;
+let channelStore = null;
 let handleAmiRequest = null;
 
 // Orchids ProxyHandler 实例缓存（按 credential.id 缓存，避免重复 initialize）
@@ -6184,6 +6185,100 @@ app.post('/api/public/usage', async (req, res) => {
     }
 });
 
+// ============ 通道管理 API（需管理员登录）============
+
+async function getChannelStore() {
+    if (!channelStore) channelStore = await ChannelStore.create();
+    return channelStore;
+}
+
+app.get('/api/channels', authMiddleware, async (req, res) => {
+    try {
+        if (!req.user.isAdmin) return res.status(403).json({ success: false, error: '需要管理员权限' });
+        const cs = await getChannelStore();
+        const data = await cs.getAllWithModels();
+        res.json({ success: true, data });
+    } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+app.post('/api/channels', authMiddleware, async (req, res) => {
+    try {
+        if (!req.user.isAdmin) return res.status(403).json({ success: false, error: '需要管理员权限' });
+        const { name, displayName, apiPath, description, isActive, sortOrder } = req.body;
+        if (!name) return res.status(400).json({ success: false, error: '通道标识不能为空' });
+        const cs = await getChannelStore();
+        const id = await cs.add({ name, displayName, apiPath, description, isActive, sortOrder });
+        res.json({ success: true, data: { id } });
+    } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+app.put('/api/channels/:id', authMiddleware, async (req, res) => {
+    try {
+        if (!req.user.isAdmin) return res.status(403).json({ success: false, error: '需要管理员权限' });
+        const cs = await getChannelStore();
+        await cs.update(parseInt(req.params.id), req.body);
+        res.json({ success: true });
+    } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+app.delete('/api/channels/:id', authMiddleware, async (req, res) => {
+    try {
+        if (!req.user.isAdmin) return res.status(403).json({ success: false, error: '需要管理员权限' });
+        const cs = await getChannelStore();
+        await cs.delete(parseInt(req.params.id));
+        res.json({ success: true });
+    } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+app.post('/api/channels/:id/models', authMiddleware, async (req, res) => {
+    try {
+        if (!req.user.isAdmin) return res.status(403).json({ success: false, error: '需要管理员权限' });
+        const { modelName, inputPrice, outputPrice, isActive } = req.body;
+        if (!modelName) return res.status(400).json({ success: false, error: '模型名称不能为空' });
+        const cs = await getChannelStore();
+        const id = await cs.addModel(parseInt(req.params.id), { modelName, inputPrice, outputPrice, isActive });
+        res.json({ success: true, data: { id } });
+    } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+app.put('/api/channels/models/:modelId', authMiddleware, async (req, res) => {
+    try {
+        if (!req.user.isAdmin) return res.status(403).json({ success: false, error: '需要管理员权限' });
+        const cs = await getChannelStore();
+        await cs.updateModel(parseInt(req.params.modelId), req.body);
+        res.json({ success: true });
+    } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+app.delete('/api/channels/models/:modelId', authMiddleware, async (req, res) => {
+    try {
+        if (!req.user.isAdmin) return res.status(403).json({ success: false, error: '需要管理员权限' });
+        const cs = await getChannelStore();
+        await cs.deleteModel(parseInt(req.params.modelId));
+        res.json({ success: true });
+    } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
+// 公开获取通道列表（无需登录，供前台展示）
+app.get('/api/public/channels', async (req, res) => {
+    try {
+        const cs = await getChannelStore();
+        const data = await cs.getAllWithModels();
+        const publicData = data.filter(ch => ch.isActive).map(ch => ({
+            name: ch.name,
+            displayName: ch.displayName,
+            apiPath: ch.apiPath,
+            description: ch.description,
+            models: ch.models.filter(m => m.isActive).map(m => ({
+                modelName: m.modelName,
+                inputPrice: m.inputPrice,
+                outputPrice: m.outputPrice
+            }))
+        }));
+        res.json({ success: true, data: publicData });
+    } catch (error) { res.status(500).json({ success: false, error: error.message }); }
+});
+
 // 公开查询渠道连通率（无需登录）
 app.get('/api/public/channel-stats', async (req, res) => {
     try {
@@ -6235,6 +6330,7 @@ async function start() {
     siteSettingsStore = await SiteSettingsStore.create();
     pricingStore = await ModelPricingStore.create();
     amiStore = await AmiCredentialStore.create();
+    channelStore = await ChannelStore.create();
     handleAmiRequest = createAmiMessagesHandler(amiStore, verifyApiKey);
 
     // 加载动态定价配置

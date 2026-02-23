@@ -84,6 +84,7 @@ export function setupDigitalOceanRoutes(app, verifyApiKey, apiLogStore) {
             userAgent: req.headers['user-agent'] || '',
             method: 'POST',
             path: '/do/v1/chat/completions',
+            channel: 'DO',
             stream: false,
             inputTokens: 0,
             outputTokens: 0,

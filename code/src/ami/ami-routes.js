@@ -3,6 +3,7 @@
  * 提供 AMI 凭据管理和对话 API
  */
 import { AmiService, AMI_MODELS } from './ami-service.js';
+import { ApiLogStore } from '../db.js';
 import { logger } from '../logger.js';
 
 const log = logger.server;
@@ -22,6 +23,23 @@ function cleanCookie(raw) {
 export function createAmiMessagesHandler(amiStore, verifyApiKey) {
     return async function handleAmiMessages(req, res) {
         let credential = null;
+        const startTime = Date.now();
+        const requestId = 'ami_' + Date.now() + Math.random().toString(36).substring(2, 8);
+        const clientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || 'unknown';
+        let apiLogStore = null;
+        let logData = {
+            requestId,
+            ipAddress: clientIp,
+            userAgent: req.headers['user-agent'] || '',
+            method: 'POST',
+            path: req.path || '/am/v1/messages',
+            channel: 'AMI',
+            stream: false,
+            inputTokens: 0,
+            outputTokens: 0,
+            statusCode: 200
+        };
+        try { apiLogStore = await ApiLogStore.create(); } catch (e) { /* ignore */ }
 
         try {
             // 验证 API Key
@@ -239,12 +257,25 @@ export function createAmiMessagesHandler(amiStore, verifyApiKey) {
                 await amiStore.updateTokenStats(credential.id, inputTokens, outputTokens);
                 log.info(`[AMI] Token 统计: input=${inputTokens}, output=${outputTokens}, credential=${credential.id}`);
             }
+
+            // 记录成功日志
+            logData.credentialId = credential.id;
+            logData.credentialName = credential.name;
+            logData.model = model || 'ami-model';
+            logData.stream = !!stream;
+            logData.inputTokens = inputTokens;
+            logData.outputTokens = outputTokens;
+            if (apiLogStore) await apiLogStore.create({ ...logData, durationMs: Date.now() - startTime });
         } catch (error) {
             log.error(`[AMI] 对话请求失败: ${error.message}`);
 
             if (credential) {
                 await amiStore.incrementErrorCount(credential.id, error.message);
             }
+
+            logData.statusCode = 500;
+            logData.errorMessage = error.message;
+            if (apiLogStore) await apiLogStore.create({ ...logData, durationMs: Date.now() - startTime });
 
             if (!res.headersSent) {
                 res.status(500).json({

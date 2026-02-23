@@ -98,6 +98,27 @@
                     </div>
                 </div>
 
+                <div class="channel-stats-section" id="channel-stats-section" style="margin-bottom: 20px;">
+                    <h3 style="font-size: 14px; font-weight: 600; color: #e0e0e0; margin-bottom: 12px;">渠道统计</h3>
+                    <div class="logs-table-wrapper">
+                        <table class="logs-table" style="font-size: 13px;">
+                            <thead>
+                                <tr>
+                                    <th>渠道</th>
+                                    <th>总请求</th>
+                                    <th>成功</th>
+                                    <th>错误</th>
+                                    <th>连通率</th>
+                                    <th>输入 Tokens</th>
+                                    <th>输出 Tokens</th>
+                                    <th>平均耗时</th>
+                                </tr>
+                            </thead>
+                            <tbody id="channel-stats-list"></tbody>
+                        </table>
+                    </div>
+                </div>
+
                 <div class="logs-filters">
                     <div class="logs-filter-group">
                         <label class="logs-filter-label">IP 地址</label>
@@ -122,6 +143,23 @@
                             <option value="401">401 未授权</option>
                             <option value="429">429 限流</option>
                             <option value="500">500 服务器错误</option>
+                        </select>
+                    </div>
+                    <div class="logs-filter-group">
+                        <label class="logs-filter-label">渠道</label>
+                        <select class="form-select logs-filter-input" id="logs-filter-channel">
+                            <option value="">全部渠道</option>
+                            <option value="kiro">Kiro</option>
+                            <option value="openai">OpenAI</option>
+                            <option value="antigravity">Antigravity</option>
+                            <option value="orchids">Orchids</option>
+                            <option value="Warp">Warp</option>
+                            <option value="Vertex">Vertex</option>
+                            <option value="Bedrock">Bedrock</option>
+                            <option value="AMI">AMI</option>
+                            <option value="Flow">Flow</option>
+                            <option value="codex">Codex</option>
+                            <option value="DO">DO</option>
                         </select>
                     </div>
                     <div class="logs-filter-group">
@@ -168,6 +206,7 @@
                                 <th style="width: 180px;">时间</th>
                                 <th style="width: 120px;">IP 地址</th>
                                 <th style="width: 100px;">API Key</th>
+                                <th style="width: 80px;">渠道</th>
                                 <th style="width: 150px;">模型</th>
                                 <th style="width: 80px;">类型</th>
                                 <th style="width: 100px;">输入/输出</th>

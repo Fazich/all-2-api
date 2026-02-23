@@ -647,6 +647,36 @@ export async function initDatabase() {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
     `);
 
+    // 创建通道配置表
+    await pool.execute(`
+        CREATE TABLE IF NOT EXISTS channels (
+            id INT PRIMARY KEY AUTO_INCREMENT,
+            name VARCHAR(100) NOT NULL UNIQUE COMMENT '通道标识，对应 api_logs.channel',
+            display_name VARCHAR(100) COMMENT '显示名称',
+            api_path VARCHAR(255) COMMENT 'API 路径，如 /v1/messages',
+            description TEXT COMMENT '通道说明',
+            is_active TINYINT(1) DEFAULT 1,
+            sort_order INT DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
+    // 创建通道支持模型表
+    await pool.execute(`
+        CREATE TABLE IF NOT EXISTS channel_models (
+            id INT PRIMARY KEY AUTO_INCREMENT,
+            channel_id INT NOT NULL,
+            model_name VARCHAR(255) NOT NULL COMMENT '模型名称',
+            input_price DECIMAL(10,4) DEFAULT 0 COMMENT '输入价格($/百万tokens)',
+            output_price DECIMAL(10,4) DEFAULT 0 COMMENT '输出价格($/百万tokens)',
+            is_active TINYINT(1) DEFAULT 1,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            INDEX idx_channel_id (channel_id),
+            UNIQUE KEY uk_channel_model (channel_id, model_name)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+    `);
+
     return pool;
 }
 
@@ -5006,6 +5036,196 @@ export class RedemptionCodeStore {
             createdBy: row.created_by,
             createdAt: row.created_at,
             expiresAt: row.expires_at
+        };
+    }
+}
+
+/**
+ * 通道配置管理类
+ */
+export class ChannelStore {
+    constructor(database) {
+        this.db = database;
+    }
+
+    static async create() {
+        const database = await getDatabase();
+        const store = new ChannelStore(database);
+        await store._ensureTables();
+        return store;
+    }
+
+    async _ensureTables() {
+        await this.db.execute(`
+            CREATE TABLE IF NOT EXISTS channels (
+                id INT PRIMARY KEY AUTO_INCREMENT,
+                name VARCHAR(100) NOT NULL UNIQUE COMMENT '通道标识，对应 api_logs.channel',
+                display_name VARCHAR(100) COMMENT '显示名称',
+                api_path VARCHAR(255) COMMENT 'API 路径',
+                description TEXT COMMENT '通道说明',
+                is_active TINYINT(1) DEFAULT 1,
+                sort_order INT DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        `);
+        await this.db.execute(`
+            CREATE TABLE IF NOT EXISTS channel_models (
+                id INT PRIMARY KEY AUTO_INCREMENT,
+                channel_id INT NOT NULL,
+                model_name VARCHAR(255) NOT NULL COMMENT '模型名称',
+                input_price DECIMAL(10,4) DEFAULT 0 COMMENT '输入价格($/百万tokens)',
+                output_price DECIMAL(10,4) DEFAULT 0 COMMENT '输出价格($/百万tokens)',
+                is_active TINYINT(1) DEFAULT 1,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                INDEX idx_channel_id (channel_id),
+                UNIQUE KEY uk_channel_model (channel_id, model_name)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        `);
+
+        // 兼容：如果表已存在但缺少某些列，尝试补上
+        const addColSafe = async (table, col, def) => {
+            try { await this.db.execute(`ALTER TABLE ${table} ADD COLUMN ${col} ${def}`); } catch(e) { /* already exists */ }
+        };
+        await addColSafe('channels', 'sort_order', 'INT DEFAULT 0 AFTER is_active');
+        await addColSafe('channels', 'display_name', "VARCHAR(100) COMMENT '显示名称' AFTER name");
+        await addColSafe('channels', 'api_path', "VARCHAR(255) COMMENT 'API 路径' AFTER display_name");
+        await addColSafe('channels', 'updated_at', 'DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP AFTER created_at');
+
+        // 如果表为空，初始化预设通道
+        const [countRows] = await this.db.execute('SELECT COUNT(*) as cnt FROM channels');
+        if (countRows[0].cnt === 0) {
+            const defaults = [
+                ['kiro', 'Claude 格式', '/v1/messages', 'Claude 原生格式接口', 1, 1],
+                ['openai', 'OpenAI 格式', '/v1/chat/completions', 'OpenAI 兼容格式接口', 1, 2],
+                ['antigravity', 'Gemini 格式', '/gemini-antigravity/v1/messages', 'Gemini Antigravity 接口', 1, 3],
+                ['orchids', 'Orchids 格式', '/orchids/v1/messages', 'Orchids 通道接口', 1, 4],
+                ['Warp', 'Warp 格式', '/w/v1/messages', 'Warp 通道接口', 1, 5],
+                ['Vertex', 'Vertex 格式', '/vertex/v1/messages', 'Vertex AI 接口', 1, 6],
+                ['Bedrock', 'Bedrock 格式', '/bedrock/v1/messages', 'Amazon Bedrock 接口', 1, 7],
+                ['AMI', 'AMI 格式', '/am/v1/messages', 'AMI 通道接口', 1, 8],
+                ['Flow', 'Flow 格式', '/flow/v1/chat/completions', 'Flow 通道接口', 1, 9],
+                ['DO', 'DO 格式', '/do/v1/chat/completions', 'DigitalOcean 接口', 1, 10],
+                ['codex', 'Codex 格式', '/codex/v1/chat/completions', 'Codex 通道接口', 1, 11]
+            ];
+            for (const [name, displayName, apiPath, description, isActive, sortOrder] of defaults) {
+                try {
+                    await this.db.execute(
+                        'INSERT INTO channels (name, display_name, api_path, description, is_active, sort_order) VALUES (?, ?, ?, ?, ?, ?)',
+                        [name, displayName, apiPath, description, isActive, sortOrder]
+                    );
+                } catch(e) { /* duplicate, skip */ }
+            }
+        }
+    }
+
+    async getAll() {
+        const [rows] = await this.db.execute(
+            'SELECT * FROM channels ORDER BY sort_order ASC, id ASC'
+        );
+        return rows.map(r => this._mapChannel(r));
+    }
+
+    async getById(id) {
+        const [rows] = await this.db.execute('SELECT * FROM channels WHERE id = ?', [id]);
+        return rows.length ? this._mapChannel(rows[0]) : null;
+    }
+
+    async add(data) {
+        const [result] = await this.db.execute(
+            'INSERT INTO channels (name, display_name, api_path, description, is_active, sort_order) VALUES (?, ?, ?, ?, ?, ?)',
+            [data.name, data.displayName || null, data.apiPath || null, data.description || null, data.isActive !== false ? 1 : 0, data.sortOrder || 0]
+        );
+        return result.insertId;
+    }
+
+    async update(id, data) {
+        const fields = [];
+        const params = [];
+        if (data.name !== undefined) { fields.push('name = ?'); params.push(data.name); }
+        if (data.displayName !== undefined) { fields.push('display_name = ?'); params.push(data.displayName); }
+        if (data.apiPath !== undefined) { fields.push('api_path = ?'); params.push(data.apiPath); }
+        if (data.description !== undefined) { fields.push('description = ?'); params.push(data.description); }
+        if (data.isActive !== undefined) { fields.push('is_active = ?'); params.push(data.isActive ? 1 : 0); }
+        if (data.sortOrder !== undefined) { fields.push('sort_order = ?'); params.push(data.sortOrder); }
+        if (fields.length === 0) return;
+        params.push(id);
+        await this.db.execute(`UPDATE channels SET ${fields.join(', ')} WHERE id = ?`, params);
+    }
+
+    async delete(id) {
+        await this.db.execute('DELETE FROM channel_models WHERE channel_id = ?', [id]);
+        await this.db.execute('DELETE FROM channels WHERE id = ?', [id]);
+    }
+
+    // ---- Models ----
+
+    async getModels(channelId) {
+        const [rows] = await this.db.execute(
+            'SELECT * FROM channel_models WHERE channel_id = ? ORDER BY model_name ASC',
+            [channelId]
+        );
+        return rows.map(r => this._mapModel(r));
+    }
+
+    async getAllWithModels() {
+        const channels = await this.getAll();
+        const [models] = await this.db.execute('SELECT * FROM channel_models ORDER BY model_name ASC');
+        const modelMap = {};
+        for (const m of models) {
+            if (!modelMap[m.channel_id]) modelMap[m.channel_id] = [];
+            modelMap[m.channel_id].push(this._mapModel(m));
+        }
+        return channels.map(ch => ({ ...ch, models: modelMap[ch.id] || [] }));
+    }
+
+    async addModel(channelId, data) {
+        const [result] = await this.db.execute(
+            'INSERT INTO channel_models (channel_id, model_name, input_price, output_price, is_active) VALUES (?, ?, ?, ?, ?)',
+            [channelId, data.modelName, data.inputPrice || 0, data.outputPrice || 0, data.isActive !== false ? 1 : 0]
+        );
+        return result.insertId;
+    }
+
+    async updateModel(modelId, data) {
+        const fields = [];
+        const params = [];
+        if (data.modelName !== undefined) { fields.push('model_name = ?'); params.push(data.modelName); }
+        if (data.inputPrice !== undefined) { fields.push('input_price = ?'); params.push(data.inputPrice); }
+        if (data.outputPrice !== undefined) { fields.push('output_price = ?'); params.push(data.outputPrice); }
+        if (data.isActive !== undefined) { fields.push('is_active = ?'); params.push(data.isActive ? 1 : 0); }
+        if (fields.length === 0) return;
+        params.push(modelId);
+        await this.db.execute(`UPDATE channel_models SET ${fields.join(', ')} WHERE id = ?`, params);
+    }
+
+    async deleteModel(modelId) {
+        await this.db.execute('DELETE FROM channel_models WHERE id = ?', [modelId]);
+    }
+
+    _mapChannel(r) {
+        return {
+            id: r.id,
+            name: r.name,
+            displayName: r.display_name,
+            apiPath: r.api_path,
+            description: r.description,
+            isActive: !!r.is_active,
+            sortOrder: r.sort_order || 0,
+            createdAt: r.created_at,
+            updatedAt: r.updated_at
+        };
+    }
+
+    _mapModel(r) {
+        return {
+            id: r.id,
+            channelId: r.channel_id,
+            modelName: r.model_name,
+            inputPrice: parseFloat(r.input_price) || 0,
+            outputPrice: parseFloat(r.output_price) || 0,
+            isActive: !!r.is_active,
+            createdAt: r.created_at
         };
     }
 }

@@ -4,7 +4,7 @@
  * 仅支持 Gemini 模型（通过 GCP Vertex AI）
  */
 import { VertexClient, VERTEX_GEMINI_MODEL_MAPPING, VERTEX_REGIONS } from './vertex.js';
-import { VertexCredentialStore, GeminiCredentialStore } from '../db.js';
+import { VertexCredentialStore, GeminiCredentialStore, ApiLogStore } from '../db.js';
 import {
     AntigravityApiService,
     GEMINI_MODELS,
@@ -414,6 +414,24 @@ export async function setupVertexRoutes(app) {
 
     // /vertex/v1/messages - Claude API 格式（仅支持 Gemini 模型）
     app.post('/vertex/v1/messages', async (req, res) => {
+        const vtxStartTime = Date.now();
+        const vtxRequestId = 'vertex_' + Date.now() + Math.random().toString(36).substring(2, 8);
+        const vtxClientIp = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.ip || 'unknown';
+        let vtxApiLogStore = null;
+        let vtxLogData = {
+            requestId: vtxRequestId,
+            ipAddress: vtxClientIp,
+            userAgent: req.headers['user-agent'] || '',
+            method: 'POST',
+            path: '/vertex/v1/messages',
+            channel: 'Vertex',
+            stream: false,
+            inputTokens: 0,
+            outputTokens: 0,
+            statusCode: 200
+        };
+        try { vtxApiLogStore = await ApiLogStore.create(); } catch (e) { /* ignore */ }
+
         const { messages, model, system, max_tokens, temperature, top_p, top_k, stream } = req.body;
 
         if (!messages || !Array.isArray(messages)) {
@@ -517,8 +535,17 @@ export async function setupVertexRoutes(app) {
 
                     await vertexStore.incrementUseCount(vertexCredential.id);
                     await vertexStore.resetErrorCount(vertexCredential.id);
+
+                    vtxLogData.credentialId = vertexCredential.id;
+                    vtxLogData.credentialName = vertexCredential.name;
+                    vtxLogData.model = model || 'gemini-1.5-flash';
+                    vtxLogData.stream = !!stream;
+                    if (vtxApiLogStore) await vtxApiLogStore.create({ ...vtxLogData, durationMs: Date.now() - vtxStartTime });
                 } catch (error) {
                     console.error(`[Vertex/Gemini] 错误: ${error.message}`);
+                    vtxLogData.statusCode = 500;
+                    vtxLogData.errorMessage = error.message;
+                    if (vtxApiLogStore) await vtxApiLogStore.create({ ...vtxLogData, durationMs: Date.now() - vtxStartTime });
                     if (!res.headersSent) {
                         res.status(500).json({ error: error.message });
                     } else {
@@ -634,6 +661,10 @@ export async function setupVertexRoutes(app) {
                         res.end();
 
                         await geminiStore.resetErrorCount(credential.id);
+
+                        vtxLogData.model = model || 'gemini-3-flash-preview';
+                        vtxLogData.stream = true;
+                        if (vtxApiLogStore) await vtxApiLogStore.create({ ...vtxLogData, durationMs: Date.now() - vtxStartTime });
                     } else {
                         // 非流式响应
                         const response = await service.generateContent(requestModel, requestBody);
@@ -641,9 +672,16 @@ export async function setupVertexRoutes(app) {
 
                         await geminiStore.resetErrorCount(credential.id);
                         res.json(claudeResponse);
+
+                        vtxLogData.model = model || 'gemini-3-flash-preview';
+                        vtxLogData.stream = false;
+                        if (vtxApiLogStore) await vtxApiLogStore.create({ ...vtxLogData, durationMs: Date.now() - vtxStartTime });
                     }
                 } catch (error) {
                     console.error(`[Vertex/Gemini/Antigravity] 错误: ${error.message}`);
+                    vtxLogData.statusCode = 500;
+                    vtxLogData.errorMessage = error.message;
+                    if (vtxApiLogStore) await vtxApiLogStore.create({ ...vtxLogData, channel: 'Vertex', durationMs: Date.now() - vtxStartTime });
                     if (!res.headersSent) {
                         res.status(500).json({ error: error.message });
                     } else {
