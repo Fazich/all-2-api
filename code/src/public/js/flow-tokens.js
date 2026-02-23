@@ -94,7 +94,7 @@ function renderTokens() {
     if (filtered.length === 0) {
         tbody.innerHTML = '';
         if (tableContainer) tableContainer.style.display = 'none';
-        if (emptyState) emptyState.style.display = 'flex';
+        if (emptyState) emptyState.style.display = 'block';
         return;
     }
 

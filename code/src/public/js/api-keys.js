@@ -9,6 +9,8 @@ let batchCreateModal;
 let renewModal;
 let batchGeneratedKeys = [];
 let currentSortBy = 'lastUsed'; // 默认排序方式
+let currentFilterStatus = 'active'; // 默认只显示启用
+let currentFilterExpiry = 'valid'; // 默认只显示未过期
 
 document.addEventListener('DOMContentLoaded', async () => {
     createKeyModal = document.getElementById('create-key-modal');
@@ -28,6 +30,7 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 function setupEventListeners() {
     document.getElementById('create-key-btn').addEventListener('click', openCreateModal);
+    document.getElementById('empty-create-btn')?.addEventListener('click', openCreateModal);
     document.getElementById('modal-close').addEventListener('click', closeCreateModal);
     document.getElementById('modal-cancel').addEventListener('click', closeCreateModal);
     document.getElementById('modal-submit').addEventListener('click', createApiKey);
@@ -35,7 +38,15 @@ function setupEventListeners() {
         if (e.target === createKeyModal) closeCreateModal();
     });
 
-    // 排序下拉框事件
+    // 过滤和排序下拉框事件
+    document.getElementById('filter-status').addEventListener('change', function(e) {
+        currentFilterStatus = e.target.value;
+        renderApiKeys();
+    });
+    document.getElementById('filter-expiry').addEventListener('change', function(e) {
+        currentFilterExpiry = e.target.value;
+        renderApiKeys();
+    });
     document.getElementById('sort-select').addEventListener('change', function(e) {
         currentSortBy = e.target.value;
         renderApiKeys();
@@ -131,9 +142,25 @@ function renderApiKeys() {
     const emptyState = document.getElementById('empty-state');
     const countEl = document.getElementById('api-keys-count');
 
-    countEl.textContent = '共 ' + apiKeys.length + ' 个密钥';
+    // 过滤
+    let filtered = [...apiKeys];
+    const now = new Date();
 
-    if (apiKeys.length === 0) {
+    if (currentFilterStatus === 'active') {
+        filtered = filtered.filter(k => k.isActive);
+    } else if (currentFilterStatus === 'disabled') {
+        filtered = filtered.filter(k => !k.isActive);
+    }
+
+    if (currentFilterExpiry === 'valid') {
+        filtered = filtered.filter(k => !k.expiresAt || new Date(k.expiresAt) > now);
+    } else if (currentFilterExpiry === 'expired') {
+        filtered = filtered.filter(k => k.expiresAt && new Date(k.expiresAt) <= now);
+    }
+
+    countEl.textContent = '共 ' + filtered.length + ' 个密钥' + (filtered.length !== apiKeys.length ? ' (总 ' + apiKeys.length + ')' : '');
+
+    if (filtered.length === 0) {
         list.innerHTML = '';
         emptyState.style.display = 'block';
         // 移除移动端卡片列表
@@ -143,7 +170,7 @@ function renderApiKeys() {
     }
 
     // 根据选择的排序方式排序
-    const sortedKeys = sortApiKeys([...apiKeys], currentSortBy);
+    const sortedKeys = sortApiKeys(filtered, currentSortBy);
 
     emptyState.style.display = 'none';
     
@@ -159,7 +186,7 @@ function renderApiKeys() {
         let limitsDisplay = '<span class="usage-loading">-</span>';
 
         return '<tr data-key-value="' + escapedKey + '">' +
-            '<td class="api-key-name-cell">' + key.name + '</td>' +
+            '<td class="api-key-name-cell" title="' + (key.name || '') + '">' + key.name + '</td>' +
             '<td>' +
             '<div class="api-key-value-cell">' +
             '<span class="api-key-value" style="font-size: 12px;">' + keyDisplay + '</span>' +
@@ -172,7 +199,8 @@ function renderApiKeys() {
             '</td>' +
             '<td><span class="logs-status-badge ' + statusClass + '">' + statusText + '</span></td>' +
             '<td class="api-key-limits" data-key-id="' + key.id + '">' + limitsDisplay + '</td>' +
-            '<td class="api-key-expire" data-key-id="' + key.id + '">-</td>' +
+            '<td class="api-key-remaining-days" data-key-id="' + key.id + '">-</td>' +
+            '<td class="api-key-remaining-cost" data-key-id="' + key.id + '">-</td>' +
             '<td>' + formatDateTime(key.createdAt) + '</td>' +
             '<td>' + (key.lastUsedAt ? formatDateTime(key.lastUsedAt) : '从未使用') + '</td>' +
             '<td>' +
@@ -198,10 +226,12 @@ function renderApiKeys() {
         });
     });
 
-    // 加载用量统计
-    sortedKeys.forEach(function(key) {
-        loadKeyLimitsStatus(key.id);
-    });
+    // 只在启用+未过期过滤条件下加载用量统计
+    if (currentFilterStatus === 'active' && currentFilterExpiry === 'valid') {
+        sortedKeys.forEach(function(key) {
+            loadKeyLimitsStatus(key.id);
+        });
+    }
 }
 
 // 移动端卡片渲染
@@ -488,7 +518,8 @@ async function loadKeyLimitsStatus(keyId) {
             
             // 桌面端表格
             const cell = document.querySelector('.api-key-limits[data-key-id="' + keyId + '"]');
-            const expireCell = document.querySelector('.api-key-expire[data-key-id="' + keyId + '"]');
+            const remainingDaysCell = document.querySelector('.api-key-remaining-days[data-key-id="' + keyId + '"]');
+            const remainingCostCell = document.querySelector('.api-key-remaining-cost[data-key-id="' + keyId + '"]');
             
             // 移动端卡片
             const cardLimits = document.querySelector('.api-key-card-limits[data-key-id="' + keyId + '"]');
@@ -542,47 +573,51 @@ async function loadKeyLimitsStatus(keyId) {
             // 更新移动端
             if (cardLimits) cardLimits.textContent = limitsText || usage.total + ' 请求';
 
-            // 处理过期时间
-            let expireHtml = '';
-            let expireText = '永久';
-            
-            if (expireDate) {
-                const daysLeft = remaining.days;
-                let expireClass = '';
-                let expireDateStr = expireDate;
-                
-                // 格式化为 MM/DD HH:mm
-                const parts = expireDate.split(' ');
-                if (parts.length === 2) {
-                    const dateParts = parts[0].split('-');
-                    const timeParts = parts[1].split(':');
-                    if (dateParts.length === 3 && timeParts.length >= 2) {
-                        expireDateStr = dateParts[1] + '/' + dateParts[2] + ' ' + timeParts[0] + ':' + timeParts[1];
+            // 处理剩余天数
+            if (remainingDaysCell) {
+                if (expireDate && remaining.days !== null) {
+                    const daysLeft = remaining.days;
+                    let daysClass = '';
+                    if (daysLeft <= 0) {
+                        daysClass = 'danger';
+                    } else if (daysLeft <= 3) {
+                        daysClass = 'danger';
+                    } else if (daysLeft <= 7) {
+                        daysClass = 'warning';
                     }
+                    remainingDaysCell.innerHTML = '<span class="limit-value ' + daysClass + '">' +
+                        (daysLeft <= 0 ? '已过期' : daysLeft + '天') + '</span>';
+                } else {
+                    remainingDaysCell.innerHTML = '<span class="limit-value" style="color: var(--text-muted);">永久</span>';
                 }
-
-                const isExpired = daysLeft <= 0;
-
-                if (isExpired) {
-                    expireClass = 'danger';
-                } else if (daysLeft <= 3) {
-                    expireClass = 'danger';
-                } else if (daysLeft <= 7) {
-                    expireClass = 'warning';
-                }
-
-                expireHtml = '<span class="limit-value ' + expireClass + '" title="剩余 ' + daysLeft + ' 天">' +
-                    (isExpired ? '已过期' : expireDateStr) + '</span>';
-                expireText = isExpired ? '已过期' : (daysLeft + '天');
-            } else {
-                expireHtml = '<span class="limit-value" style="color: var(--text-muted);">永久</span>';
             }
 
-            // 更新桌面端过期时间
-            if (expireCell) expireCell.innerHTML = expireHtml;
-            
+            // 处理剩余金额
+            if (remainingCostCell) {
+                let costParts = [];
+                if (limits.monthlyCostLimit > 0) {
+                    const remainCost = remaining.monthlyCost !== null ? remaining.monthlyCost.toFixed(2) : '-';
+                    costParts.push('月$' + remainCost);
+                }
+                if (limits.totalCostLimit > 0) {
+                    const remainCost = remaining.totalCost !== null ? remaining.totalCost.toFixed(2) : '-';
+                    costParts.push('总$' + remainCost);
+                }
+                if (costParts.length > 0) {
+                    remainingCostCell.innerHTML = '<span class="limit-value">' + costParts.join(' ') + '</span>';
+                } else {
+                    remainingCostCell.innerHTML = '<span class="limit-value" style="color: var(--text-muted);">无限制</span>';
+                }
+            }
+
             // 更新移动端过期时间
-            if (cardExpire) cardExpire.textContent = expireText;
+            if (cardExpire) {
+                if (expireDate && remaining.days !== null) {
+                    cardExpire.textContent = remaining.days <= 0 ? '已过期' : (remaining.days + '天');
+                } else {
+                    cardExpire.textContent = '永久';
+                }
+            }
         }
     } catch (err) {
         console.error('Load key limits status error:', err);

@@ -86,6 +86,20 @@
                     <div class="content-header-left">
                         <span class="account-count" id="api-keys-count">共 0 个密钥</span>
                         <div class="sort-select-wrapper">
+                            <select class="form-select sort-select" id="filter-status">
+                                <option value="active">启用</option>
+                                <option value="all">全部状态</option>
+                                <option value="disabled">禁用</option>
+                            </select>
+                        </div>
+                        <div class="sort-select-wrapper">
+                            <select class="form-select sort-select" id="filter-expiry">
+                                <option value="valid">未过期</option>
+                                <option value="all">全部</option>
+                                <option value="expired">已过期</option>
+                            </select>
+                        </div>
+                        <div class="sort-select-wrapper">
                             <select class="form-select sort-select" id="sort-select">
                                 <option value="lastUsed">最后使用</option>
                                 <option value="created">创建时间</option>
@@ -118,14 +132,15 @@
                     <table class="api-keys-table">
                         <thead>
                             <tr>
-                                <th style="width: 100px;">名称</th>
-                                <th style="width: 140px;">密钥</th>
-                                <th style="width: 60px;">状态</th>
-                                <th style="width: 130px;">限制/用量</th>
-                                <th style="width: 100px;">过期时间</th>
-                                <th style="width: 100px;">创建时间</th>
-                                <th style="width: 100px;">最后使用</th>
-                                <th style="width: 140px;">操作</th>
+                                <th style="width: 10%;">名称</th>
+                                <th style="width: 18%;">密钥</th>
+                                <th style="width: 6%;">状态</th>
+                                <th style="width: 14%;">限制/用量</th>
+                                <th style="width: 8%;">剩余天数</th>
+                                <th style="width: 10%;">剩余金额</th>
+                                <th style="width: 10%;">创建时间</th>
+                                <th style="width: 10%;">最后使用</th>
+                                <th style="width: 14%;">操作</th>
                             </tr>
                         </thead>
                         <tbody id="api-keys-list"></tbody>
@@ -134,10 +149,20 @@
 
                 <div class="empty-state" id="empty-state" style="display: none;">
                     <svg class="empty-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                        <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
+                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                        <circle cx="9" cy="7" r="4"/>
+                        <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+                        <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
                     </svg>
                     <h3 class="empty-title">暂无 API 密钥</h3>
-                    <p class="empty-description">创建一个 API 密钥来访问 API 服务</p>
+                    <p class="empty-description">您还没有创建任何 API 密钥，点击下方按钮创建您的第一个密钥</p>
+                    <button class="btn btn-primary" id="empty-create-btn">
+                        <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="12" y1="5" x2="12" y2="19"/>
+                            <line x1="5" y1="12" x2="19" y2="12"/>
+                        </svg>
+                        创建密钥
+                    </button>
                 </div>
             </div>
         </main>

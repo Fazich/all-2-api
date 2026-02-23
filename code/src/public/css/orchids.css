@@ -316,7 +316,7 @@
     color: var(--accent-danger); 
 }
 .stat-icon.primary { 
-    background: rgba(99, 102, 241, 0.15); 
+    background: rgba(193, 95, 60, 0.12); 
     color: var(--accent-primary); 
 }
 
@@ -461,7 +461,7 @@
 
 .orchids-account-card:hover {
     transform: translateY(-2px);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
     border-color: rgba(139, 92, 246, 0.3);
 }
 
@@ -992,7 +992,7 @@
     padding: 3px 0;
     display: flex;
     gap: 8px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.02);
+    border-bottom: 1px solid rgba(0, 0, 0, 0.04);
 }
 
 .register-log:last-child {

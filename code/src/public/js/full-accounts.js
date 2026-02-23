@@ -61,7 +61,7 @@ function renderTable() {
     if (filteredCredentials.length === 0) {
         tbody.innerHTML = '';
         tableContainer.style.display = 'none';
-        emptyState.style.display = 'flex';
+        emptyState.style.display = 'block';
         return;
     }
 

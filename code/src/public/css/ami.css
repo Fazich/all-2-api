@@ -30,8 +30,8 @@
 }
 
 .page-icon.ami-icon {
-    background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
-    box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
+    background: linear-gradient(135deg, #C15F3C 0%, #D4714E 100%);
+    box-shadow: 0 4px 12px rgba(193, 95, 60, 0.3);
 }
 
 .page-icon svg {
@@ -114,7 +114,7 @@
 }
 
 .stat-card-icon.total {
-    background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
+    background: linear-gradient(135deg, #C15F3C 0%, #D4714E 100%);
     color: white;
 }
 
@@ -268,7 +268,7 @@
 
 .ami-card:hover {
     transform: translateY(-2px);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
     border-color: rgba(139, 92, 246, 0.3);
 }
 
@@ -591,7 +591,7 @@
     width: 42px;
     height: 42px;
     border-radius: var(--radius-md);
-    background: linear-gradient(135deg, #8b5cf6 0%, #6366f1 100%);
+    background: linear-gradient(135deg, #C15F3C 0%, #D4714E 100%);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -734,7 +734,7 @@
 }
 
 .ami-badge.paid {
-    background: linear-gradient(135deg, #8b5cf6, #6366f1);
+    background: linear-gradient(135deg, #C15F3C, #D4714E);
     color: white;
 }
 

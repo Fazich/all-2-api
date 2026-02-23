@@ -1936,17 +1936,26 @@ app.get('/api/keys', authMiddleware, async (req, res) => {
     try {
         const keys = req.user.isAdmin ? await apiKeyStore.getAll() : await apiKeyStore.getByUserId(req.userId);
         // 返回完整信息（包含 keyValue）
-        const safeKeys = keys.map(k => ({
-            id: k.id,
-            userId: k.userId,
-            username: k.username,
-            name: k.name,
-            keyValue: k.keyValue,
-            keyPrefix: k.keyPrefix,
-            isActive: k.isActive,
-            lastUsedAt: k.lastUsedAt,
-            createdAt: k.createdAt
-        }));
+        const safeKeys = keys.map(k => {
+            let expiresAt = null;
+            if (k.expiresInDays > 0 && k.createdAt) {
+                const createDateStr = String(k.createdAt).replace(' ', 'T') + (String(k.createdAt).includes('+') ? '' : '+08:00');
+                const createDate = new Date(createDateStr);
+                expiresAt = new Date(createDate.getTime() + k.expiresInDays * 24 * 60 * 60 * 1000).toISOString();
+            }
+            return {
+                id: k.id,
+                userId: k.userId,
+                username: k.username,
+                name: k.name,
+                keyValue: k.keyValue,
+                keyPrefix: k.keyPrefix,
+                isActive: k.isActive,
+                lastUsedAt: k.lastUsedAt,
+                createdAt: k.createdAt,
+                expiresAt: expiresAt
+            };
+        });
         res.json({ success: true, data: safeKeys });
     } catch (error) {
         res.status(500).json({ success: false, error: error.message });

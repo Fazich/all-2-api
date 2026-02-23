@@ -20,7 +20,6 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     await loadCredentials();
     await loadStatistics();
-    await loadModels();
     setupEventListeners();
     setupDropZone();
     setupRegionSelector();
@@ -144,7 +143,7 @@ function renderCards() {
 
     if (filtered.length === 0) {
         grid.style.display = 'none';
-        emptyState.style.display = 'flex';
+        emptyState.style.display = 'block';
         return;
     }
 

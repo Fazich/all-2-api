@@ -12,13 +12,12 @@
     <style>
         .oauth-container {
             max-width: 900px;
-            margin: 0 auto;
             padding: 24px;
         }
 
         .oauth-cards-grid {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            grid-template-columns: repeat(2, 280px);
             gap: 20px;
             margin-bottom: 24px;
         }
@@ -73,69 +72,6 @@
         .oauth-card .btn {
             width: 100%;
             max-width: 280px;
-        }
-
-        /* 选项区域 */
-        .oauth-options {
-            background: var(--bg-tertiary);
-            border: 1px solid var(--border-color);
-            border-radius: var(--radius-lg);
-            padding: 24px;
-            margin-top: 24px;
-        }
-
-        .oauth-options h4 {
-            font-size: 16px;
-            font-weight: 600;
-            margin-bottom: 16px;
-            color: var(--text-primary);
-        }
-
-        .option-group {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 16px;
-            margin-bottom: 16px;
-        }
-
-        .option-group:last-child {
-            margin-bottom: 0;
-        }
-
-        .option-item {
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }
-
-        .option-item label {
-            font-size: 14px;
-            color: var(--text-secondary);
-            cursor: pointer;
-        }
-
-        .option-item input[type="text"] {
-            background: var(--bg-secondary);
-            border: 1px solid var(--border-color);
-            border-radius: var(--radius-sm);
-            padding: 8px 12px;
-            color: var(--text-primary);
-            font-size: 14px;
-            width: 200px;
-        }
-
-        .option-item input[type="text"]:focus {
-            outline: none;
-            border-color: var(--accent-primary);
-        }
-
-        .option-item select {
-            background: var(--bg-secondary);
-            border: 1px solid var(--border-color);
-            border-radius: var(--radius-sm);
-            padding: 8px 12px;
-            color: var(--text-primary);
-            font-size: 14px;
         }
 
         /* 状态区域 */
@@ -242,95 +178,6 @@
             to { transform: rotate(360deg); }
         }
 
-        /* 历史记录 */
-        .oauth-history {
-            margin-top: 24px;
-        }
-
-        .history-header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 16px;
-        }
-
-        .history-header h4 {
-            font-size: 16px;
-            font-weight: 600;
-            color: var(--text-primary);
-        }
-
-        .history-list {
-            background: var(--bg-card);
-            border: 1px solid var(--border-color);
-            border-radius: var(--radius-lg);
-            overflow: hidden;
-        }
-
-        .history-item {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            padding: 16px;
-            border-bottom: 1px solid var(--border-color);
-            transition: background var(--transition-fast);
-        }
-
-        .history-item:last-child {
-            border-bottom: none;
-        }
-
-        .history-item:hover {
-            background: var(--bg-card-hover);
-        }
-
-        .history-info {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-
-        .history-icon {
-            width: 40px;
-            height: 40px;
-            border-radius: var(--radius-sm);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            background: rgba(255, 153, 0, 0.2);
-            color: #ff9900;
-        }
-
-        .history-details h5 {
-            font-size: 14px;
-            font-weight: 500;
-            color: var(--text-primary);
-            margin-bottom: 4px;
-        }
-
-        .history-details span {
-            font-size: 12px;
-            color: var(--text-muted);
-        }
-
-        .history-actions {
-            display: flex;
-            gap: 8px;
-        }
-
-        .empty-state {
-            text-align: center;
-            padding: 48px 24px;
-            color: var(--text-muted);
-        }
-
-        .empty-state svg {
-            width: 48px;
-            height: 48px;
-            margin-bottom: 16px;
-            opacity: 0.5;
-        }
-
         .user-code-display {
             font-size: 24px;
             font-weight: 700;
@@ -413,25 +260,6 @@
                         </div>
                     </div>
 
-                    <!-- 选项区域 -->
-                    <div class="oauth-options">
-                        <h4>登录选项</h4>
-                        <div class="option-group">
-                            <div class="option-item">
-                                <label for="credential-name">凭据名称 (可选):</label>
-                                <input type="text" id="credential-name" placeholder="自动生成">
-                            </div>
-                            <div class="option-item">
-                                <label for="region-select">区域:</label>
-                                <select id="region-select">
-                                    <option value="us-east-1">us-east-1</option>
-                                    <option value="us-west-1">us-west-1</option>
-                                    <option value="us-west-2">us-west-2</option>
-                                    <option value="eu-west-1">eu-west-1</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
 
                     <!-- 状态区域 -->
                     <div class="oauth-status" id="oauth-status">
@@ -469,30 +297,6 @@
                         </div>
                     </div>
 
-                    <!-- 最近添加的账号 -->
-                    <div class="oauth-history">
-                        <div class="history-header">
-                            <h4>最近添加的账号</h4>
-                            <button class="btn btn-secondary btn-sm" onclick="loadRecentAccounts()">
-                                <svg class="btn-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <polyline points="23 4 23 10 17 10"/>
-                                    <path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/>
-                                </svg>
-                                刷新
-                            </button>
-                        </div>
-                        <div class="history-list" id="history-list">
-                            <div class="empty-state">
-                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
-                                    <circle cx="9" cy="7" r="4"/>
-                                    <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
-                                    <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-                                </svg>
-                                <p>暂无最近添加的账号</p>
-                            </div>
-                        </div>
-                    </div>
                 </div>
             </div>
         </main>

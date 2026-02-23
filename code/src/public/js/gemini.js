@@ -56,7 +56,7 @@ function renderCards() {
 
     if (filteredCredentials.length === 0) {
         grid.innerHTML = '';
-        emptyState.style.display = 'flex';
+        emptyState.style.display = 'block';
         return;
     }
 
